@@ -156,9 +156,13 @@ func TestContract_ToolCall(t *testing.T) {
 	})
 	for _, ep := range eps {
 		t.Run(ep.name, func(t *testing.T) {
+			// 60s context 兜底：http.Client 8s 超时是主控（网络不可达→SKIP），
+			// context 仅防御 8s 内未超时的异常挂起。
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
 			c := newTestClient(t, ep)
-			resp, err := c.Complete(context.Background(), agentmodel.Request{
-				Messages: userMsg("请用 calculator 工具计算 1+2，只调用工具，不要输出其他内容"),
+			resp, err := c.Complete(ctx, agentmodel.Request{
+				Messages: userMsg("请调用 calculator 工具计算 1+2。使用参数 {\"expression\": \"1+2\"}。不要输出计算结果，只需要发起这次工具调用。"),
 				Tools:    []agentmodel.ToolSchema{tool},
 			})
 			if err != nil {
