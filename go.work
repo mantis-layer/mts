@@ -1,12 +1,13 @@
 go 1.25.4
 
 use (
-	./agent-model
 	./adapters/model-openai
-	./agent-core
-	./agent-plugin
 	./agent-compose
-	./tools
+	./agent-core
+	./agent-model
+	./agent-plugin
+	./agent-runtime
 	./cli
 	./examples/tool_loop_agent
+	./tools
 )
