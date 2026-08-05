@@ -209,6 +209,28 @@ func TestContract_AuthenticationError(t *testing.T) {
 	t.Logf("认证错误映射正确: %v", me)
 }
 
+// TestRedactSecrets 验证错误体中的 Bearer token 与 sk- 密钥被脱敏。
+func TestRedactSecrets(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{`{"error":"unauthorized","auth":"Bearer sk-acw-92b51d2e-9bec066031ebac40"}`, `{"error":"unauthorized","auth":"Bearer [REDACTED]"}`},
+		{`token sk-proj-abcdefgh12345678 leaked`, `token sk-[REDACTED] leaked`},
+		{`Authorization: bearer abc123XYZ_-+/=ABCDEFGH`, `Authorization: Bearer [REDACTED]`},
+		{`Authorization: Bearer: ghp_ABCDEFGHIJKLMNOP`, `Authorization: Bearer [REDACTED]`},
+		{`clean message`, `clean message`},
+		// 普通英文不得被过度脱敏
+		{`the bearer token is invalid`, `the bearer token is invalid`},
+		{`bearer of the good news`, `bearer of the good news`},
+	}
+	for _, cse := range cases {
+		got := redactSecrets(cse.in)
+		if got != cse.want {
+			t.Fatalf("redactSecrets(%q) = %q, 期望 %q", cse.in, got, cse.want)
+		}
+	}
+}
+
 func asModelError(err error, target **agentmodel.ModelError) bool {
 	me, ok := err.(*agentmodel.ModelError)
 	if ok {
