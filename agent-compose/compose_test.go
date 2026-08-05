@@ -102,6 +102,8 @@ func TestValidate_Errors(t *testing.T) {
 		{"name", &AgentManifest{APIVersion: "v1", Name: "", Model: ModelSpec{Provider: "p", Model: "m"}}, "missing_name"},
 		{"provider", &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Model: "m"}}, "missing_provider"},
 		{"model name", &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "p"}}, "missing_model_name"},
+		{"明文 api_key", &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "p", Model: "m", APIKey: "sk-plaintext"}}, "plaintext_api_key"},
+		{"非法 env 引用", &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "p", Model: "m", APIKey: "${ bad name }"}}, "plaintext_api_key"},
 	}
 	for _, cse := range cases {
 		err := cse.m.Validate()
@@ -121,6 +123,14 @@ func asManifestErr(err error, target **ManifestError) bool {
 }
 
 // ---- Parse / Load ----
+
+func TestValidate_EnvRefOK(t *testing.T) {
+	// ${ENV} 引用形式的 api_key 应通过
+	m := &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "openai-compatible", Model: "m", APIKey: "${MTS_API_KEY}"}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("env 引用应通过: %v", err)
+	}
+}
 
 func TestParseManifest_YAML(t *testing.T) {
 	yaml := `
