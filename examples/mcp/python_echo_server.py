@@ -53,20 +53,29 @@ def handle_request(msg):
     if method == "tools/list":
         return {"tools": TOOLS}
     if method == "tools/call":
-        name = params.get("name")
-        args = params.get("arguments") or {}
-        if name == "echo":
-            text = str(args.get("msg", ""))
-            return {"content": [{"type": "text", "text": f"echo: {text}"}]}
-        if name == "sum":
-            numbers = args.get("numbers", [])
-            total = sum(float(n) for n in numbers)
-            text = str(int(total)) if float(total).is_integer() else str(total)
-            return {"content": [{"type": "text", "text": text}]}
-        return {
-            "content": [{"type": "text", "text": f"未知工具: {name}"}],
-            "isError": True,
-        }
+        try:
+            name = params.get("name")
+            args = params.get("arguments") or {}
+            if not isinstance(args, dict):
+                raise ValueError("arguments 必须是对象")
+            if name == "echo":
+                text = str(args.get("msg", ""))
+                return {"content": [{"type": "text", "text": f"echo: {text}"}]}
+            if name == "sum":
+                numbers = args.get("numbers", [])
+                total = sum(float(n) for n in numbers)
+                text = str(int(total)) if float(total).is_integer() else str(total)
+                return {"content": [{"type": "text", "text": text}]}
+            return {
+                "content": [{"type": "text", "text": f"未知工具: {name}"}],
+                "isError": True,
+            }
+        except (TypeError, ValueError) as exc:
+            # 非法参数不得使 server 进程崩溃：返回 isError（协议级容错）。
+            return {
+                "content": [{"type": "text", "text": f"参数错误: {exc}"}],
+                "isError": True,
+            }
     # notifications 等无响应方法
     return None
 
@@ -83,7 +92,13 @@ def main():
         if "id" not in msg:  # notification
             continue
         result = handle_request(msg)
-        if result is None:
+        if result is None:  # 未知方法：返回 JSON-RPC method not found
+            sys.stdout.write(json.dumps({
+                "jsonrpc": "2.0",
+                "id": msg["id"],
+                "error": {"code": -32601, "message": "method not found"},
+            }) + "\n")
+            sys.stdout.flush()
             continue
         sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\n")
         sys.stdout.flush()

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ func TestPythonServerInterop(t *testing.T) {
 		t.Skip("python3 不可用，跳过跨语言 MCP 联调")
 	}
 	serverPath := filepath.Join("..", "..", "examples", "mcp", "python_echo_server.py")
-	if _, err := fileExists(serverPath); err != nil {
+	if _, err := os.Stat(serverPath); err != nil {
 		t.Fatalf("Python server 不存在: %v", err)
 	}
 
@@ -61,6 +62,15 @@ func TestPythonServerInterop(t *testing.T) {
 		t.Fatalf("sum 结果 = %q (isErr=%v)", out, isErr)
 	}
 
+	// 非法参数容错：server 不得崩溃，返回 isError
+	out, isErr, err = client.CallTool(ctx, "sum", map[string]any{"numbers": []any{"abc"}})
+	if err != nil {
+		t.Fatalf("CallTool(sum 非法参数): %v", err)
+	}
+	if !isErr || out == "" {
+		t.Fatalf("非法参数应返回 isError: out=%q isErr=%v", out, isErr)
+	}
+
 	// 包装为 agentcore.Tool 并注册（端到端：可被 Agent 使用）
 	reg := agentcore.NewRegistry()
 	adapter := NewToolAdapter(client, names["echo"], "py_echo")
@@ -74,12 +84,4 @@ func TestPythonServerInterop(t *testing.T) {
 	if res["content"] != "echo: agent 调用" {
 		t.Fatalf("Execute 结果 = %+v", res)
 	}
-}
-
-func fileExists(path string) (bool, error) {
-	info, err := filepath.Glob(path)
-	if err != nil {
-		return false, err
-	}
-	return len(info) > 0, nil
 }

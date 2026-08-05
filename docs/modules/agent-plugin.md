@@ -87,7 +87,7 @@ _ = reg.Register(ctx, &myToolPlugin{})          // 实现 ToolPlugin
 _ = reg.Register(ctx, &myModelPlugin{})         // 实现 ModelProviderPlugin
 
 // MCP 工具
-client, _ := mcp.NewClient(ctx, "python", "mcp_server.py")
+client, _ := mcp.NewClient(ctx, "python3", "mcp_server.py")
 adapter := mcp.NewToolAdapter(client, mcp.ToolInfo{Name: "fetch"}, "fetch")
 _ = coreRegistry.Register(adapter)              // 作为普通 Tool 使用
 ```
