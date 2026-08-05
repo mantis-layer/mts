@@ -161,20 +161,23 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		return run, fmt.Errorf("agentruntime: run %s 处于 waiting，需 SubmitHumanInput 后重试", runID)
 	}
 
-	if run.State != RunStateRunning {
-		if err := rt.transition(ctx, run, RunStateRunning); err != nil {
-			return nil, err
-		}
-		_ = rt.addEvent(ctx, run, EventTaskRunStarted, nil)
-	}
-
-	// 注册取消函数：Cancel API 通过它中断执行中的 Pattern（FR-004）。
+	// 注册取消函数：必须在状态转移之前注册，
+	// 否则 transition(running) 到 registerCancel 之间存在窗口：
+	// 外部 Cancel 此时读到 running 但 cancelExecuting 返回 false，
+	// 其写入的 cancelled 会被 Run 后续 UpdateRun 覆盖（用户取消被吞）。
 	runCtx, cancelFn := context.WithCancel(ctx)
 	rt.registerCancel(runID, cancelFn)
 	defer func() {
 		cancelFn()
 		rt.unregisterCancel(runID)
 	}()
+
+	if run.State != RunStateRunning {
+		if err := rt.transition(ctx, run, RunStateRunning); err != nil {
+			return nil, err
+		}
+		_ = rt.addEvent(ctx, run, EventTaskRunStarted, nil)
+	}
 
 	pattern, ok := rt.getPattern(run.Pattern)
 	if !ok {
@@ -369,16 +372,20 @@ func (rt *Runtime) transition(ctx context.Context, run *TaskRun, to RunState) er
 
 func (rt *Runtime) fail(ctx context.Context, run *TaskRun, err error) error {
 	run.Error = err.Error()
-	if cerr := rt.transition(ctx, run, RunStateFailed); cerr != nil {
+	// 取消路径的 storage 写必须用 WithoutCancel：
+	// 已取消的 ctx 会让 SQLite ExecContext 立即失败，导致终态写不进去。
+	sc := context.WithoutCancel(ctx)
+	if cerr := rt.transition(sc, run, RunStateFailed); cerr != nil {
 		return cerr
 	}
-	_ = rt.addEvent(ctx, run, EventTaskRunFailed, map[string]any{"error": err.Error()})
-	return rt.storage.UpdateRun(ctx, run)
+	_ = rt.addEvent(sc, run, EventTaskRunFailed, map[string]any{"error": err.Error()})
+	return rt.storage.UpdateRun(sc, run)
 }
 
 func (rt *Runtime) cancelRun(ctx context.Context, run *TaskRun, reason string) error {
-	_ = rt.addEvent(ctx, run, EventTaskRunCancelled, map[string]any{"reason": reason})
-	return rt.transition(ctx, run, RunStateCancelled)
+	sc := context.WithoutCancel(ctx)
+	_ = rt.addEvent(sc, run, EventTaskRunCancelled, map[string]any{"reason": reason})
+	return rt.transition(sc, run, RunStateCancelled)
 }
 
 func (rt *Runtime) runEvaluators(ctx context.Context, run *TaskRun) (bool, error) {

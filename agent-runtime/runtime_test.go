@@ -52,66 +52,68 @@ func newTestRuntime(t *testing.T, s Storage, b Budget) *Runtime {
 // ---- 并发安全（review blocking 修复验证） ----
 
 func TestRuntime_ConcurrentRun(t *testing.T) {
-	s := NewMemoryStorage()
-	rt := newTestRuntime(t, s, Budget{})
-	// 3 步才 Done 的 pattern：若双 Run 并发执行，Iterations 会翻倍
-	rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{
-		{Iterations: 1}, {Iterations: 1}, {Done: true, Iterations: 1},
-	}})
-	ctx := context.Background()
-	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
+	for _, s := range newTestStorage(t) {
+		rt := newTestRuntime(t, s, Budget{})
+		// 3 步才 Done 的 pattern：若双 Run 并发执行，Iterations 会翻倍
+		rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{
+			{Iterations: 1}, {Iterations: 1}, {Done: true, Iterations: 1},
+		}})
+		ctx := context.Background()
+		run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
 
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _ = rt.Run(ctx, run.ID)
-		}()
-	}
-	wg.Wait()
+		var wg sync.WaitGroup
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = rt.Run(ctx, run.ID)
+			}()
+		}
+		wg.Wait()
 
-	final, err := rt.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final.State != RunStateCompleted {
-		t.Fatalf("终态 = %s", final.State)
-	}
-	if final.Iterations != 3 {
-		t.Fatalf("Iterations = %d，期望 3（并发重复执行会翻倍）", final.Iterations)
+		final, err := rt.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if final.State != RunStateCompleted {
+			t.Fatalf("终态 = %s", final.State)
+		}
+		if final.Iterations != 3 {
+			t.Fatalf("Iterations = %d，期望 3（并发重复执行会翻倍）", final.Iterations)
+		}
 	}
 }
 
 func TestRuntime_CancelAPIWhileRunning(t *testing.T) {
-	s := NewMemoryStorage()
-	rt := newTestRuntime(t, s, Budget{})
-	if err := rt.RegisterPattern(blockingPattern{}); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "blocking", Input: "x"})
+	for _, s := range newTestStorage(t) {
+		rt := newTestRuntime(t, s, Budget{})
+		if err := rt.RegisterPattern(blockingPattern{}); err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "blocking", Input: "x"})
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = rt.Run(ctx, run.ID)
-	}()
-	time.Sleep(50 * time.Millisecond) // 确保进入 running
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = rt.Run(ctx, run.ID)
+		}()
+		time.Sleep(50 * time.Millisecond) // 确保进入 running
 
-	// Cancel API 触发执行中 Run 的取消
-	cancelled, err := rt.Cancel(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("Cancel: %v", err)
-	}
-	<-done
+		// Cancel API 触发执行中 Run 的取消
+		cancelled, err := rt.Cancel(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		<-done
 
-	final, err := rt.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final.State != RunStateCancelled {
-		t.Fatalf("Cancel API 后终态 = %s，期望 cancelled（Cancel 返回 %s）", final.State, cancelled.State)
+		final, err := rt.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if final.State != RunStateCancelled {
+			t.Fatalf("Cancel API 后终态 = %s，期望 cancelled（Cancel 返回 %s）", final.State, cancelled.State)
+		}
 	}
 }
 
