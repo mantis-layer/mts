@@ -392,15 +392,15 @@ func (rt *Runtime) transition(ctx context.Context, run *TaskRun, to RunState) er
 	return nil
 }
 
-// transitionOrReturn 执行状态迁移；若迁移因并发修改（如外部取消）失败，
-// 返回 storage 中的最新状态（调用方应直接返回该状态）。
+// transitionOrReturn 执行状态迁移；若迁移失败（含并发 CAS 冲突），
+// 返回 storage 中的最新状态并透传原始错误（调用方据此返回）。
 func (rt *Runtime) transitionOrReturn(ctx context.Context, run *TaskRun, to RunState) (*TaskRun, error) {
 	if err := rt.transition(ctx, run, to); err != nil {
 		cur, gerr := rt.storage.GetRun(context.WithoutCancel(ctx), run.ID)
 		if gerr != nil {
 			return nil, err
 		}
-		return cur, nil
+		return cur, err
 	}
 	return nil, nil
 }

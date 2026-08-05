@@ -179,6 +179,21 @@ func TestSQLite_UpdateRunNotFound(t *testing.T) {
 	}
 }
 
+func TestSQLite_MemoryDSN(t *testing.T) {
+	s, err := NewSQLiteStorage(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLiteStorage(:memory:): %v", err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.SaveTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	if _, err := s.GetTask(ctx, "t1"); err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+}
+
 // ---- 状态机生命周期（E1） ----
 
 func TestRuntime_StateMachineLifecycle(t *testing.T) {
