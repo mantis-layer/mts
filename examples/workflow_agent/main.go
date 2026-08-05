@@ -85,17 +85,22 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	go func() { _, _ = rt.Run(ctx, run.ID) }()
+	go func() {
+		// 忽略预期的 waiting 错误；真实错误（storage 故障等）会体现在终态。
+		_, _ = rt.Run(ctx, run.ID)
+	}()
 
 	// 4. 轮询：WAITING_HUMAN 时收集人工输入并提交
 	reader := bufio.NewReader(os.Stdin)
+	var lastProgress string
 	for {
 		cur, err := rt.GetRun(context.Background(), run.ID)
 		if err != nil {
 			log.Fatalf("查询运行: %v", err)
 		}
-		if cur.Progress != "" {
+		if cur.Progress != "" && cur.Progress != lastProgress {
 			fmt.Printf("[步骤] %s\n", cur.Progress)
+			lastProgress = cur.Progress
 		}
 		switch cur.State {
 		case agentruntime.RunStateWaiting:
@@ -117,6 +122,10 @@ func main() {
 			} else {
 				line, _ := reader.ReadString('\n')
 				answer = strings.TrimSpace(line)
+			}
+			if answer == "" {
+				fmt.Println("（输入为空，请重新输入）")
+				continue
 			}
 			if _, err := rt.SubmitHumanInput(context.Background(), run.ID, answer); err != nil {
 				log.Fatalf("提交人工输入: %v", err)

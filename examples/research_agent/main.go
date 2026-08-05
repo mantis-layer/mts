@@ -91,13 +91,15 @@ func main() {
 		_, err := rt.Run(ctx, run.ID)
 		done <- err
 	}()
+	var printed int
 	for {
 		cur, err := rt.GetRun(context.Background(), run.ID)
 		if err != nil {
 			log.Fatalf("查询运行: %v", err)
 		}
-		if cur.Summary != "" {
-			fmt.Printf("[%s] %s", cur.State, cur.Summary)
+		if len(cur.Summary) > printed {
+			fmt.Printf("[%s] %s", cur.State, cur.Summary[printed:])
+			printed = len(cur.Summary)
 		}
 		switch cur.State {
 		case agentruntime.RunStateCompleted, agentruntime.RunStateFailed, agentruntime.RunStateCancelled:
@@ -111,9 +113,18 @@ finish:
 		log.Fatalf("运行失败: %v", err)
 	}
 
-	// 5. 结果：报告 Artifact + Evaluator 验收
-	final, _ := rt.GetRun(context.Background(), run.ID)
+	// 5. 结果：报告 Artifact + Evaluator 验收（失败/取消时 Result 为空）
+	final, err := rt.GetRun(context.Background(), run.ID)
+	if err != nil {
+		log.Fatalf("查询终态: %v", err)
+	}
 	fmt.Printf("\n=== 终态 ===\n状态: %s\n摘要: %s\n", final.State, final.Summary)
+	if final.State != agentruntime.RunStateCompleted || final.Result == nil {
+		if final.Error != "" {
+			fmt.Printf("错误: %s\n", final.Error)
+		}
+		return
+	}
 	for _, a := range final.Result.Artifacts {
 		fmt.Printf("Artifact: %s (type=%s, id=%s)\n%s\n", a.Name, a.Type, a.ID, a.Content)
 	}
