@@ -53,11 +53,12 @@ func TestWorkflowPattern(t *testing.T) {
 	}
 }
 
-// TestWorkflowPattern_Reject R2：审批拒绝 → 流程终止。
+// TestWorkflowPattern_Reject R2+S3：审批拒绝 → 流程终止（failed，不进 Evaluator/完成路径）。
 func TestWorkflowPattern_Reject(t *testing.T) {
 	s := NewMemoryStorage()
 	rt := newTestRuntime(t, s, Budget{})
 	rt.RegisterPattern(NewWorkflowPattern(wfSteps()))
+	rt.RegisterEvaluator(&EvidenceCoverageEvaluator{Required: 1}) // 被拒流程不应触发 Evaluator
 	ctx := context.Background()
 	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "workflow", Input: "发布"})
 	if _, err := rt.Run(ctx, run.ID); err != nil {
@@ -67,11 +68,84 @@ func TestWorkflowPattern_Reject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitHumanInput: %v", err)
 	}
+	// 拒绝 = 业务终止 → failed（非 completed，非 evaluator 判定的 failed）
+	if final.State != RunStateFailed {
+		t.Fatalf("拒绝后终态 = %s，期望 failed", final.State)
+	}
+	if !strings.Contains(final.Error, "审批未通过") {
+		t.Fatalf("Error = %q", final.Error)
+	}
+	if strings.Contains(final.Summary, "[发布]") {
+		t.Fatalf("拒绝后 Summary = %q（不应执行发布）", final.Summary)
+	}
+}
+
+// TestWorkflowPattern_MultiApproval B1 回归：双审批节点，第二个必须重新进入 waiting。
+func TestWorkflowPattern_MultiApproval(t *testing.T) {
+	steps := []WorkflowStep{
+		{Name: "步骤A", Action: func(_ context.Context, _ string) (string, error) { return "A", nil }},
+		{Name: "审批A", Human: true, Prompt: "批准 A？"},
+		{Name: "步骤B", Action: func(_ context.Context, _ string) (string, error) { return "B", nil }},
+		{Name: "审批B", Human: true, Prompt: "批准 B？"},
+	}
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	rt.RegisterPattern(NewWorkflowPattern(steps))
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "workflow", Input: "流程"})
+
+	// 第一次等待：审批A
+	w1, err := rt.Run(ctx, run.ID)
+	if err != nil || w1.State != RunStateWaiting {
+		t.Fatalf("第一次等待 = %v, %v", w1, err)
+	}
+	// 批准 A → 应停在审批B（而非静默放行）
+	w2, err := rt.SubmitHumanInput(ctx, run.ID, "批准")
+	if err != nil || w2.State != RunStateWaiting {
+		t.Fatalf("批准 A 后 = %v, %v（期望再次 waiting 于审批B）", w2, err)
+	}
+	if !strings.Contains(w2.Summary, "[审批A] 审批通过") || !strings.Contains(w2.Summary, "[步骤B] B") {
+		t.Fatalf("Summary = %q", w2.Summary)
+	}
+	// 批准 B → 完成
+	final, err := rt.SubmitHumanInput(ctx, run.ID, "批准")
+	if err != nil || final.State != RunStateCompleted {
+		t.Fatalf("批准 B 后 = %v, %v", final, err)
+	}
+	if !strings.Contains(final.Summary, "[审批B] 审批通过") {
+		t.Fatalf("Summary = %q", final.Summary)
+	}
+}
+
+// TestWorkflowPattern_CrossStepEvidence S2 回归：步骤1 产 artifact，步骤2 引用它。
+func TestWorkflowPattern_CrossStepEvidence(t *testing.T) {
+	steps := []WorkflowStep{
+		{Name: "起草", Action: func(_ context.Context, _ string) (string, error) { return "草稿完成", nil },
+			Artifacts: []Artifact{{Name: "draft", Type: ArtifactText, Content: "草稿"}}},
+		{Name: "定稿", Action: func(_ context.Context, _ string) (string, error) { return "定稿完成", nil },
+			Evidence: []Evidence{{ArtifactID: "draft", Source: "步骤1", Quote: "草稿引用"}}},
+	}
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	rt.RegisterPattern(NewWorkflowPattern(steps))
+	rt.RegisterEvaluator(&EvidenceCoverageEvaluator{Required: 1})
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "workflow", Input: "写文档"})
+	final, err := rt.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	if final.State != RunStateCompleted {
 		t.Fatalf("终态 = %s", final.State)
 	}
-	if !strings.Contains(final.Summary, "审批未通过") || strings.Contains(final.Summary, "[发布]") {
-		t.Fatalf("拒绝后 Summary = %q（不应执行发布）", final.Summary)
+	// 跨步骤 Evidence 已关联到真实 Artifact ID（EvidenceCoverage 通过即证明）
+	arts, _ := rt.storage.Artifacts(ctx, run.ID)
+	if len(arts) != 1 || arts[0].Name != "draft" {
+		t.Fatalf("Artifacts = %v", arts)
+	}
+	evs, _ := rt.storage.Evidence(ctx, arts[0].ID)
+	if len(evs) != 1 || evs[0].Source != "步骤1" {
+		t.Fatalf("Evidence = %v", evs)
 	}
 }
 

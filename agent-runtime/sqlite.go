@@ -79,10 +79,26 @@ func (s *SQLiteStorage) initSchema() error {
 			return fmt.Errorf("agentruntime: sqlite schema: %w", err)
 		}
 	}
-	// 旧库迁移：runs 表新增 progress/task_input 列（幂等；重复列错误忽略）。
-	_, _ = s.db.Exec(`ALTER TABLE runs ADD COLUMN progress TEXT`)
-	_, _ = s.db.Exec(`ALTER TABLE runs ADD COLUMN task_input TEXT`)
+	// 旧库迁移：runs 表新增 progress/task_input 列（幂等；仅忽略 duplicate column）。
+	if _, err := s.db.Exec(`ALTER TABLE runs ADD COLUMN progress TEXT`); err != nil && !isDuplicateColumn(err) {
+		return fmt.Errorf("agentruntime: migrate progress: %w", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE runs ADD COLUMN task_input TEXT`); err != nil && !isDuplicateColumn(err) {
+		return fmt.Errorf("agentruntime: migrate task_input: %w", err)
+	}
+	// 回填 NULL（旧行新列为 NULL，GetRun 裸 string 扫描会报错）
+	if _, err := s.db.Exec(`UPDATE runs SET progress = '' WHERE progress IS NULL`); err != nil {
+		return fmt.Errorf("agentruntime: backfill progress: %w", err)
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET task_input = '' WHERE task_input IS NULL`); err != nil {
+		return fmt.Errorf("agentruntime: backfill task_input: %w", err)
+	}
 	return nil
+}
+
+// isDuplicateColumn 判断错误是否为 "duplicate column name"。
+func isDuplicateColumn(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column")
 }
 
 func (s *SQLiteStorage) SaveTask(ctx context.Context, task *Task) error {
@@ -223,13 +239,19 @@ func (s *SQLiteStorage) GetRun(ctx context.Context, id string) (*TaskRun, error)
 		`SELECT id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, progress, task_input, input, result_json, error, created_at, updated_at FROM runs WHERE id = ?`, id)
 	var r TaskRun
 	var usageJSON, resultJSON, createdAt, updatedAt sql.NullString
+	// progress/task_input/input/error 用 NullString：旧库迁移前/损坏数据可为 NULL（S1）。
+	var progress, taskInput, input, runErr sql.NullString
 	if err := row.Scan(&r.ID, &r.TaskID, &r.Pattern, (*string)(&r.State), &r.Iterations, &r.ToolCalls,
-		&usageJSON, &r.Summary, &r.Progress, &r.TaskInput, &r.Input, &resultJSON, &r.Error, &createdAt, &updatedAt); err != nil {
+		&usageJSON, &r.Summary, &progress, &taskInput, &input, &resultJSON, &runErr, &createdAt, &updatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &NotFoundError{Kind: "run", ID: id}
 		}
 		return nil, fmt.Errorf("agentruntime: get run: %w", err)
 	}
+	r.Progress = progress.String
+	r.TaskInput = taskInput.String
+	r.Input = input.String
+	r.Error = runErr.String
 	if usageJSON.Valid {
 		_ = json.Unmarshal([]byte(usageJSON.String), &r.Usage)
 	}
@@ -336,6 +358,33 @@ func (s *SQLiteStorage) Evidence(ctx context.Context, artifactID string) ([]Evid
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// AddArtifactsEvidence SQLite 实现：单事务批量写入（S4，不留孤立数据）。
+func (s *SQLiteStorage) AddArtifactsEvidence(ctx context.Context, arts []Artifact, evs []Evidence) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("agentruntime: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // 成功 Commit 后 Rollback 是 no-op
+	for _, a := range arts {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO artifacts (id, run_id, name, type, content, created_at) VALUES (?,?,?,?,?,?)`,
+			a.ID, a.TaskRunID, a.Name, string(a.Type), a.Content, a.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+			return fmt.Errorf("agentruntime: tx add artifact: %w", err)
+		}
+	}
+	for _, e := range evs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO evidence (artifact_id, source, quote) VALUES (?,?,?)`,
+			e.ArtifactID, e.Source, e.Quote); err != nil {
+			return fmt.Errorf("agentruntime: tx add evidence: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("agentruntime: commit tx: %w", err)
+	}
+	return nil
 }
 
 // CompareAndSetState SQLite 实现：UPDATE ... WHERE state=? 的原子 CAS。

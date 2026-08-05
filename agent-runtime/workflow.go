@@ -20,6 +20,9 @@ type WorkflowStep struct {
 	Prompt string // 审批提示
 	// SkipRule 是 Rule Evaluator：返回 true 时跳过本步骤（不执行 Action、不等待审批）。
 	SkipRule func(ctx context.Context, run *TaskRun) bool
+	// Artifacts / Evidence 是本步骤的结构化产出（执行后由 Runtime 原子落库）。
+	Artifacts []Artifact
+	Evidence  []Evidence
 }
 
 // WorkflowPattern 实现多步骤工作流（FR-005 Pattern），
@@ -62,12 +65,15 @@ func (p *WorkflowPattern) Execute(ctx context.Context, run *TaskRun) (*StepResul
 					Progress:    wfProgress(idx),
 				}, nil
 			}
-			if isReject(run.Input) {
+			// 一次性输入：消费后清空，避免残留导致后续审批节点被静默放行（B1）。
+			input := run.Input
+			run.Input = ""
+			if isReject(input) {
 				idx = len(p.steps)
 				return &StepResult{
-					Done:     true,
-					Output:   fmt.Sprintf("[%s] 审批未通过，流程终止", step.Name),
-					Progress: wfProgress(idx),
+					Terminated: true,
+					Output:     fmt.Sprintf("[%s] 审批未通过，流程终止", step.Name),
+					Progress:   wfProgress(idx),
 				}, nil
 			}
 			idx++
@@ -88,8 +94,10 @@ func (p *WorkflowPattern) Execute(ctx context.Context, run *TaskRun) (*StepResul
 		}
 		idx++
 		return &StepResult{
-			Output:   fmt.Sprintf("[%s] %s", step.Name, out),
-			Progress: wfProgress(idx),
+			Output:    fmt.Sprintf("[%s] %s", step.Name, out),
+			Progress:  wfProgress(idx),
+			Artifacts: step.Artifacts,
+			Evidence:  step.Evidence,
 		}, nil
 	}
 	return &StepResult{Done: true}, nil
