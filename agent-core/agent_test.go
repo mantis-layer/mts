@@ -82,9 +82,9 @@ func toolStream(name, args string) []agentmodel.StreamEvent {
 
 // mockTool 记录调用并可配置结果/错误/阻塞行为。
 type mockTool struct {
-	name  string
+	name   string
 	schema map[string]any
-	fn    func(ctx context.Context, input map[string]any) (map[string]any, error)
+	fn     func(ctx context.Context, input map[string]any) (map[string]any, error)
 }
 
 func (t *mockTool) Name() string        { return t.name }
@@ -129,7 +129,10 @@ func TestRun_ToolLoopCompletes(t *testing.T) {
 	if err := reg.Register(&mockTool{
 		name:   "calculator",
 		schema: map[string]any{"type": "object", "properties": map[string]any{"expression": map[string]any{"type": "string"}}, "required": []string{"expression"}},
-		fn:     func(_ context.Context, input map[string]any) (map[string]any, error) { gotInput = input; return map[string]any{"result": 3.0}, nil },
+		fn: func(_ context.Context, input map[string]any) (map[string]any, error) {
+			gotInput = input
+			return map[string]any{"result": 3.0}, nil
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -25,9 +25,9 @@ type Usage struct {
 
 // Request 是一次模型补全的输入。
 type Request struct {
-	Messages []Message   `json:"messages"`
+	Messages []Message    `json:"messages"`
 	Tools    []ToolSchema `json:"tools,omitempty"`
-	Model    string      `json:"model,omitempty"`
+	Model    string       `json:"model,omitempty"`
 }
 
 // Response 是一次非流式模型调用的结果。
