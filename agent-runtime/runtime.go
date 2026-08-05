@@ -342,6 +342,7 @@ func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*
 
 // Cancel 取消运行（终态幂等）。
 // 对执行中的 Run：触发其上下文取消（pattern 中断），并把状态迁移到 cancelled。
+// CAS 失败（状态已被并发迁移）时返回 storage 最新状态，取消不静默丢失。
 func (rt *Runtime) Cancel(ctx context.Context, runID string) (*TaskRun, error) {
 	run, err := rt.storage.GetRun(ctx, runID)
 	if err != nil {
@@ -353,7 +354,14 @@ func (rt *Runtime) Cancel(ctx context.Context, runID string) (*TaskRun, error) {
 	}
 	// 触发执行中 Run 的取消（不阻塞；Run 检测到后自行迁移终态）
 	rt.cancelExecuting(runID)
-	_ = rt.cancelRun(ctx, run, "user cancelled")
+	if err := rt.cancelRun(ctx, run, "user cancelled"); err != nil {
+		// CAS 失败（并发迁移/非法转移）：返回最新状态而非静默成功
+		cur, gerr := rt.storage.GetRun(context.WithoutCancel(ctx), runID)
+		if gerr != nil {
+			return nil, err
+		}
+		return cur, nil
+	}
 	return rt.storage.GetRun(ctx, runID)
 }
 
@@ -454,8 +462,12 @@ func (rt *Runtime) fail(ctx context.Context, run *TaskRun, err error) error {
 
 func (rt *Runtime) cancelRun(ctx context.Context, run *TaskRun, reason string) error {
 	sc := context.WithoutCancel(ctx)
+	// 先 CAS 迁移再写 cancelled 事件——CAS 失败（并发迁移）时不留污染事件。
+	if err := rt.transition(sc, run, RunStateCancelled); err != nil {
+		return err
+	}
 	_ = rt.addEvent(sc, run, EventTaskRunCancelled, map[string]any{"reason": reason})
-	return rt.transition(sc, run, RunStateCancelled)
+	return nil
 }
 
 func (rt *Runtime) runEvaluators(ctx context.Context, run *TaskRun) (bool, error) {
