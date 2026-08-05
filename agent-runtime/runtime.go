@@ -362,7 +362,8 @@ func (rt *Runtime) Cancel(ctx context.Context, runID string) (*TaskRun, error) {
 		}
 		return cur, nil
 	}
-	return rt.storage.GetRun(ctx, runID)
+	// 成功分支同样用 WithoutCancel：调用方 ctx 已取消时仍能读到已写入的 cancelled 状态
+	return rt.storage.GetRun(context.WithoutCancel(ctx), runID)
 }
 
 // GetRun / GetTask 查询。
