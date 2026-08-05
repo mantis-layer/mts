@@ -49,6 +49,133 @@ func newTestRuntime(t *testing.T, s Storage, b Budget) *Runtime {
 	return rt
 }
 
+// ---- 并发安全（review blocking 修复验证） ----
+
+func TestRuntime_ConcurrentRun(t *testing.T) {
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	// 3 步才 Done 的 pattern：若双 Run 并发执行，Iterations 会翻倍
+	rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{
+		{Iterations: 1}, {Iterations: 1}, {Done: true, Iterations: 1},
+	}})
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = rt.Run(ctx, run.ID)
+		}()
+	}
+	wg.Wait()
+
+	final, err := rt.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != RunStateCompleted {
+		t.Fatalf("终态 = %s", final.State)
+	}
+	if final.Iterations != 3 {
+		t.Fatalf("Iterations = %d，期望 3（并发重复执行会翻倍）", final.Iterations)
+	}
+}
+
+func TestRuntime_CancelAPIWhileRunning(t *testing.T) {
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	if err := rt.RegisterPattern(blockingPattern{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "blocking", Input: "x"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = rt.Run(ctx, run.ID)
+	}()
+	time.Sleep(50 * time.Millisecond) // 确保进入 running
+
+	// Cancel API 触发执行中 Run 的取消
+	cancelled, err := rt.Cancel(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	<-done
+
+	final, err := rt.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != RunStateCancelled {
+		t.Fatalf("Cancel API 后终态 = %s，期望 cancelled（Cancel 返回 %s）", final.State, cancelled.State)
+	}
+}
+
+func TestRuntime_ConcurrentHumanInput(t *testing.T) {
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{
+		{NeedHuman: true},
+		{Done: true, Output: "完成"},
+	}})
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
+	if _, err := rt.Run(ctx, run.ID); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = rt.SubmitHumanInput(ctx, run.ID, "输入")
+		}(i)
+	}
+	wg.Wait()
+
+	final, err := rt.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != RunStateCompleted {
+		t.Fatalf("终态 = %s，期望 completed", final.State)
+	}
+}
+
+func TestRuntime_EvaluatorFail(t *testing.T) {
+	s := NewMemoryStorage()
+	rt := newTestRuntime(t, s, Budget{})
+	rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{{Done: true}}})
+	rt.RegisterEvaluator(&SchemaEvaluator{ArtifactName: "缺失"})
+	ctx := context.Background()
+	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
+	final, err := rt.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if final.State != RunStateFailed {
+		t.Fatalf("Evaluator 未通过时终态 = %s，期望 failed", final.State)
+	}
+}
+
+func TestSQLite_UpdateRunNotFound(t *testing.T) {
+	s := mustSQLite(t, t.TempDir()+"/u.db")
+	defer s.Close()
+	err := s.UpdateRun(context.Background(), &TaskRun{ID: "nope"})
+	if err == nil {
+		t.Fatal("UpdateRun 不存在 run 应报 NotFoundError")
+	}
+	if _, ok := err.(*NotFoundError); !ok {
+		t.Fatalf("期望 NotFoundError，得到 %T: %v", err, err)
+	}
+}
+
 // ---- 状态机生命周期（E1） ----
 
 func TestRuntime_StateMachineLifecycle(t *testing.T) {
@@ -216,7 +343,11 @@ func TestRuntime_Evaluators(t *testing.T) {
 
 	ctx := context.Background()
 	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "mock", Input: "x"})
-	if _, err := rt.AddArtifact(ctx, run.ID, "report", ArtifactJSON, `{"ok":true}`); err != nil {
+	art, err := rt.AddArtifact(ctx, run.ID, "report", ArtifactJSON, `{"ok":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.AddEvidence(ctx, art.ID, "source", "quote"); err != nil {
 		t.Fatal(err)
 	}
 	final, err := rt.Run(ctx, run.ID)

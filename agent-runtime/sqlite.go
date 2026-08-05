@@ -102,14 +102,14 @@ func (s *SQLiteStorage) GetTask(ctx context.Context, id string) (*Task, error) {
 }
 
 func (s *SQLiteStorage) CreateRun(ctx context.Context, run *TaskRun) error {
-	return s.insertRun(ctx, run)
+	return s.insertRun(ctx, run, false)
 }
 
 func (s *SQLiteStorage) UpdateRun(ctx context.Context, run *TaskRun) error {
-	return s.insertRun(ctx, run) // INSERT OR REPLACE 保证幂等更新
+	return s.insertRun(ctx, run, true)
 }
 
-func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun) error {
+func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly bool) error {
 	usageJSON, err := json.Marshal(run.Usage)
 	if err != nil {
 		return fmt.Errorf("agentruntime: marshal usage: %w", err)
@@ -120,6 +120,23 @@ func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun) error {
 		if err != nil {
 			return fmt.Errorf("agentruntime: marshal result: %w", err)
 		}
+	}
+	if updateOnly {
+		// 与 MemoryStorage 契约一致：UpdateRun 对不存在的 run 必须报 NotFoundError，
+		// 不能静默建行（否则丢失更新会被掩盖）。
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
+			 WHERE id = ?`,
+			run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
+			string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+			run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano), run.ID)
+		if err != nil {
+			return fmt.Errorf("agentruntime: update run: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return &NotFoundError{Kind: "run", ID: run.ID}
+		}
+		return nil
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)

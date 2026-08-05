@@ -11,14 +11,20 @@ import (
 
 // Runtime 是 Task Runtime 入口：提交 Task、创建 TaskRun、执行、暂停/恢复、
 // 取消、人工输入、事件与 Artifact 持久化（FR-004）。
+//
+// 并发安全：每个 runID 有独立的 per-run 锁（runLocks），
+// Run/SubmitHumanInput 全程持锁防止重复执行；
+// Cancel 通过 runCancels 触发执行中 Run 的上下文取消（不阻塞），
+// 并从 storage 将状态迁移到 cancelled。
 type Runtime struct {
 	storage    Storage
 	patterns   map[string]Pattern
 	evaluators map[string]Evaluator
 	budget     Budget
 
-	mu     sync.Mutex
-	nextID int
+	mu         sync.Mutex
+	runLocks   map[string]*sync.Mutex
+	runCancels map[string]context.CancelFunc
 }
 
 // NewRuntime 构造 Runtime。storage 不能为 nil。
@@ -31,7 +37,47 @@ func NewRuntime(storage Storage, budget Budget) (*Runtime, error) {
 		patterns:   make(map[string]Pattern),
 		evaluators: make(map[string]Evaluator),
 		budget:     budget,
+		runLocks:   make(map[string]*sync.Mutex),
+		runCancels: make(map[string]context.CancelFunc),
 	}, nil
+}
+
+// lockRun 获取 runID 对应的 per-run 锁。锁不释放删除（避免 ABA），
+// run 数量有限时可接受；长生命周期场景由调用方控制。
+func (rt *Runtime) lockRun(id string) *sync.Mutex {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	l, ok := rt.runLocks[id]
+	if !ok {
+		l = &sync.Mutex{}
+		rt.runLocks[id] = l
+	}
+	return l
+}
+
+// registerCancel 注册执行中 Run 的取消函数（Cancel API 使用）。
+func (rt *Runtime) registerCancel(id string, fn context.CancelFunc) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.runCancels[id] = fn
+}
+
+func (rt *Runtime) unregisterCancel(id string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	delete(rt.runCancels, id)
+}
+
+// cancelExecuting 触发执行中 Run 的上下文取消（如无则返回 false）。
+func (rt *Runtime) cancelExecuting(id string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	fn, ok := rt.runCancels[id]
+	if ok && fn != nil {
+		fn()
+		return true
+	}
+	return false
 }
 
 // RegisterPattern 注册 Pattern（FR-005 Host）。
@@ -95,7 +141,15 @@ func (rt *Runtime) SubmitTask(ctx context.Context, task *Task) (*TaskRun, error)
 
 // Run 执行 TaskRun 直到终态（completed/failed/cancelled）或进入 waiting。
 // 幂等：已终态直接返回；waiting 需要 SubmitHumanInput 后重新 Run。
+// 并发安全：per-run 锁保证同一 run 不会被重复执行。
 func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
+	l := rt.lockRun(runID)
+	l.Lock()
+	defer l.Unlock()
+	return rt.runLocked(ctx, runID)
+}
+
+func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error) {
 	run, err := rt.storage.GetRun(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -111,20 +165,26 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 		if err := rt.transition(ctx, run, RunStateRunning); err != nil {
 			return nil, err
 		}
-		if err := rt.addEvent(ctx, run, EventTaskRunStarted, nil); err != nil {
-			return nil, err
-		}
+		_ = rt.addEvent(ctx, run, EventTaskRunStarted, nil)
 	}
+
+	// 注册取消函数：Cancel API 通过它中断执行中的 Pattern（FR-004）。
+	runCtx, cancelFn := context.WithCancel(ctx)
+	rt.registerCancel(runID, cancelFn)
+	defer func() {
+		cancelFn()
+		rt.unregisterCancel(runID)
+	}()
 
 	pattern, ok := rt.getPattern(run.Pattern)
 	if !ok {
-		_ = rt.fail(ctx, run, fmt.Errorf("Pattern 未注册"))
+		_ = rt.fail(runCtx, run, fmt.Errorf("Pattern 未注册"))
 		return rt.storage.GetRun(ctx, runID)
 	}
 
 	for {
-		if err := ctx.Err(); err != nil {
-			_ = rt.cancelRun(ctx, run, "context cancelled")
+		if err := runCtx.Err(); err != nil {
+			_ = rt.cancelRun(runCtx, run, "context cancelled")
 			return rt.storage.GetRun(ctx, runID)
 		}
 		if rt.budget.Exceeded(run.Iterations, run.ToolCalls) {
@@ -135,11 +195,11 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 			return rt.storage.GetRun(ctx, runID)
 		}
 
-		step, err := pattern.Execute(ctx, run)
+		step, err := pattern.Execute(runCtx, run)
 		if err != nil {
-			if ctx.Err() != nil {
+			if runCtx.Err() != nil {
 				// 取消优先于失败：执行中被取消 → cancelled
-				_ = rt.cancelRun(ctx, run, "context cancelled")
+				_ = rt.cancelRun(runCtx, run, "context cancelled")
 			} else {
 				_ = rt.fail(ctx, run, err)
 			}
@@ -157,10 +217,11 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 			_ = rt.addEvent(ctx, run, EventHumanInputRequested, map[string]any{"prompt": step.HumanPrompt})
 			// Checkpoint：持久化等待状态
 			if err := rt.storage.UpdateRun(ctx, run); err != nil {
-				return nil, err
+				_ = rt.fail(ctx, run, err)
+				return rt.storage.GetRun(ctx, runID)
 			}
 			_ = rt.addEvent(ctx, run, EventCheckpointSaved, nil)
-			return run, nil
+			return rt.storage.GetRun(ctx, runID)
 		}
 
 		if step.Output != "" {
@@ -177,7 +238,7 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 		}
 	}
 
-	// 完成 + Evaluator 验收
+	// 完成 + Evaluator 验收（任一 Evaluator 未通过 → failed）
 	arts, err := rt.storage.Artifacts(ctx, run.ID)
 	if err != nil {
 		_ = rt.fail(ctx, run, err)
@@ -190,8 +251,13 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 		Iterations: run.Iterations,
 		Artifacts:  arts,
 	}
-	if err := rt.runEvaluators(ctx, run); err != nil {
+	passed, err := rt.runEvaluators(ctx, run)
+	if err != nil {
 		_ = rt.fail(ctx, run, err)
+		return rt.storage.GetRun(ctx, runID)
+	}
+	if !passed {
+		_ = rt.fail(ctx, run, fmt.Errorf("Evaluator 验收未通过"))
 		return rt.storage.GetRun(ctx, runID)
 	}
 	if err := rt.transition(ctx, run, RunStateCompleted); err != nil {
@@ -205,7 +271,12 @@ func (rt *Runtime) Run(ctx context.Context, runID string) (*TaskRun, error) {
 }
 
 // SubmitHumanInput 向 waiting 的 TaskRun 提供人工输入（FR-004 HITL / S6 前置）。
+// 并发安全：per-run 锁防止双提交重复执行。
 func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*TaskRun, error) {
+	l := rt.lockRun(runID)
+	l.Lock()
+	defer l.Unlock()
+
 	run, err := rt.storage.GetRun(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -224,11 +295,12 @@ func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*
 	if err := rt.transition(ctx, run, RunStateRunning); err != nil {
 		return nil, err
 	}
-	// 进入 running 并继续执行（阻塞直到终态或再次 waiting）
-	return rt.Run(ctx, runID)
+	// 已持 per-run 锁，直接执行（不重复加锁）
+	return rt.runLocked(ctx, runID)
 }
 
 // Cancel 取消运行（终态幂等）。
+// 对执行中的 Run：触发其上下文取消（pattern 中断），并把状态迁移到 cancelled。
 func (rt *Runtime) Cancel(ctx context.Context, runID string) (*TaskRun, error) {
 	run, err := rt.storage.GetRun(ctx, runID)
 	if err != nil {
@@ -238,6 +310,8 @@ func (rt *Runtime) Cancel(ctx context.Context, runID string) (*TaskRun, error) {
 	case RunStateCompleted, RunStateFailed, RunStateCancelled:
 		return run, nil
 	}
+	// 触发执行中 Run 的取消（不阻塞；Run 检测到后自行迁移终态）
+	rt.cancelExecuting(runID)
 	_ = rt.cancelRun(ctx, run, "user cancelled")
 	return rt.storage.GetRun(ctx, runID)
 }
@@ -307,21 +381,21 @@ func (rt *Runtime) cancelRun(ctx context.Context, run *TaskRun, reason string) e
 	return rt.transition(ctx, run, RunStateCancelled)
 }
 
-func (rt *Runtime) runEvaluators(ctx context.Context, run *TaskRun) error {
+func (rt *Runtime) runEvaluators(ctx context.Context, run *TaskRun) (bool, error) {
 	rt.mu.Lock()
 	names := make([]string, 0, len(rt.evaluators))
 	for n := range rt.evaluators {
 		names = append(names, n)
 	}
 	rt.mu.Unlock()
-	var allPassed = true
+	allPassed := true
 	for _, n := range names {
 		rt.mu.Lock()
 		e := rt.evaluators[n]
 		rt.mu.Unlock()
 		res, err := e.Evaluate(ctx, run, rt.storage)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !res.Passed {
 			allPassed = false
@@ -330,8 +404,7 @@ func (rt *Runtime) runEvaluators(ctx context.Context, run *TaskRun) error {
 			"evaluator": n, "passed": res.Passed, "score": res.Score, "details": res.Details,
 		})
 	}
-	_ = allPassed
-	return nil
+	return allPassed, nil
 }
 
 func (rt *Runtime) addEvent(ctx context.Context, run *TaskRun, kind EventKind, data map[string]any) error {
