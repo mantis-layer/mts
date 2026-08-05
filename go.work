@@ -8,4 +8,5 @@ use (
 	./agent-compose
 	./tools
 	./cli
+	./examples/tool_loop_agent
 )
