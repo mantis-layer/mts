@@ -44,14 +44,15 @@ is_allowed() {
 FAIL=0
 for mod in "${!ALLOWED[@]}"; do
   tmpfile=$(mktemp)
-  if ! go list -deps -f '{{.ImportPath}}' "$mod/..." >"$tmpfile" 2>/tmp/checkdeps-err.$$; then
-    echo "go list 失败: $mod: $(cat /tmp/checkdeps-err.$$)"
-    rm -f "$tmpfile" /tmp/checkdeps-err.$$
+  errfile=$(mktemp)
+  if ! go list -deps -f '{{.ImportPath}}' "$mod/..." >"$tmpfile" 2>"$errfile"; then
+    echo "go list 失败: $mod: $(cat "$errfile")"
+    rm -f "$tmpfile" "$errfile"
     FAIL=1
     continue
   fi
   deps=$(grep "^$PREFIX/" "$tmpfile" | sort -u || true)
-  rm -f "$tmpfile"
+  rm -f "$tmpfile" "$errfile"
   for d in $deps; do
     # 跳过自身及同 module 内的子包（如 agent-plugin/mcp）
     case "$d" in
