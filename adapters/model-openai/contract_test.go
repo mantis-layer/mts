@@ -156,6 +156,8 @@ func TestContract_ToolCall(t *testing.T) {
 	})
 	for _, ep := range eps {
 		t.Run(ep.name, func(t *testing.T) {
+			// 60s context 兜底：http.Client 8s 超时是主控（网络不可达→SKIP），
+			// context 仅防御 8s 内未超时的异常挂起。
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			c := newTestClient(t, ep)
