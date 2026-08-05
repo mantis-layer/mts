@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -136,25 +137,37 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// loadEnvFile 加载简单的 KEY=VALUE 环境文件（不覆盖已存在的环境变量）。
-func loadEnvFile(path string) {
-	data, err := os.ReadFile(path)
+// loadEnvFile 从当前目录向上（最多 4 层）查找并加载简单的 KEY=VALUE 环境文件
+// （不覆盖已存在的环境变量）。支持仓库根 .env.local 从子目录运行。
+func loadEnvFile(name string) {
+	dir, err := os.Getwd()
 	if err != nil {
 		return
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	for i := 0; i < 4; i++ {
+		candidate := filepath.Join(dir, name)
+		if data, err := os.ReadFile(candidate); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				key, value, ok := strings.Cut(line, "=")
+				if !ok {
+					continue
+				}
+				key = strings.TrimSpace(key)
+				value = strings.TrimSpace(value)
+				if os.Getenv(key) == "" {
+					_ = os.Setenv(key, value)
+				}
+			}
+			return
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
 		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if os.Getenv(key) == "" {
-			_ = os.Setenv(key, value)
-		}
+		dir = parent
 	}
 }
