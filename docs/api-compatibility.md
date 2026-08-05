@@ -21,7 +21,7 @@ agent-model / agent-core  ←  tools
 以上全部 ←  cli（入口）  ←  examples
 ```
 
-规则：**agent-model 不依赖任何内部 Module；agent-core 仅依赖 agent-model；任何 Module 不得依赖 agent-runtime**（Runtime 是上层；v0.1 的 `cli`/`examples` 尚不依赖 runtime，后续版本引入）。`scripts/check-deps.sh` 在 CI 中自动执行。
+规则：**agent-model 不依赖任何内部 Module；agent-core 仅依赖 agent-model；内部 Module（非 examples）不得依赖 agent-runtime**（Runtime 是上层；`examples/research_agent` / `examples/workflow_agent` 作为示例层是唯一允许依赖 runtime 的入口）。`scripts/check-deps.sh` 在 CI 中自动执行。
 
 ## 公共 API（v0.1）
 

@@ -9,8 +9,8 @@
 #   - adapters/*：仅依赖 agent-model
 #   - tools：仅依赖 agent-model、agent-core
 #   - cli：仅依赖以上全部（入口层）
-#   - examples/*：仅依赖以上全部（示例层）
-#   - 任何 module 不得依赖 agent-runtime（M4 前禁止提前引入）
+#   - examples/*：仅依赖以上全部（示例层）；research/workflow 示例额外依赖 agent-runtime
+#   - 任何内部 module（非 examples）不得依赖 agent-runtime（Runtime 仅示例层使用）
 #
 # 用法：scripts/check-deps.sh（在仓库根执行）
 set -euo pipefail
@@ -29,6 +29,8 @@ declare -A ALLOWED=(
   ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/examples/research_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/examples/workflow_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-runtime $PREFIX/tools"
 )
 
 # is_allowed 判断依赖 d 是否在允许前缀集合内。
