@@ -214,7 +214,7 @@ func TestRedactSecrets(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{`{"error":"unauthorized","auth":"Bearer sk-acw-92b51d2e-9bec066031ebac40"}`, `{"error":"unauthorized","auth":"Bearer [REDACTED]"}`},
+		{`{"error":"unauthorized","auth":"Bearer sk-test-1234567890abcdef"}`, `{"error":"unauthorized","auth":"Bearer [REDACTED]"}`},
 		{`token sk-proj-abcdefgh12345678 leaked`, `token sk-[REDACTED] leaked`},
 		{`Authorization: bearer abc123XYZ_-+/=ABCDEFGH`, `Authorization: Bearer [REDACTED]`},
 		{`Authorization: Bearer: ghp_ABCDEFGHIJKLMNOP`, `Authorization: Bearer [REDACTED]`},
