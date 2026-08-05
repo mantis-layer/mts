@@ -8,12 +8,14 @@
 | `MTS_API_KEY` | API 密钥 | 是，除非使用 `--api-key` |
 | `MTS_MODEL` | 模型名称 | 是，除非使用 `--model` |
 
-CLI 会优先读取旗标，缺失时回退到环境变量。它还会从当前目录向上最多查找四层 `.env.local`，并在仓库根目录停止；已有环境变量不会被文件覆盖。
+CLI 会优先读取旗标，缺失时回退到环境变量。它还会**从当前目录向上最多查找四层 `.env.local`，并在仓库根（含 `.git` 或 `go.work`）停止**——防止读取仓库外祖先目录的 `.env.local`（凭证钓鱼向量）；已有环境变量不会被文件覆盖。文件行支持可选的 `export` 前缀与引号。
 
 ```bash
 go run ./cli --baseurl "$MTS_BASEURL" --api-key "$MTS_API_KEY" \
   --model "$MTS_MODEL" --task "读取 examples/data.json 并生成摘要" --json
 ```
+
+受限网络需要代理时：`export HTTPS_PROXY=http://127.0.0.1:7890`（契约测试与 CLI 均遵循标准代理环境变量）。
 
 ## Agent Manifest
 

@@ -24,7 +24,15 @@ go test ./tools
 
 ## OpenAI 契约测试
 
-`adapters/model-openai` 的契约测试只有在配置 `MTS_CONTRACT_ENDPOINTS` 后才会请求外部端点；未配置时会跳过。把它视为 Provider 兼容性验证，而不是普通单元测试。
+`adapters/model-openai` 的契约测试（`TestContract*`）只有配置了真实端点环境变量后才请求外部端点；未配置时自动 SKIP：
+
+```bash
+cd adapters/model-openai
+export MTS_BASEURL="https://..." MTS_API_KEY="..." MTS_MODEL="..."
+go test -v -run TestContract ./...
+```
+
+契约测试还支持**第二端点**（`MTS_BASEURL2`/`MTS_API_KEY2`/`MTS_MODEL2`）用于验证"≥2 个 OpenAI 兼容端点通过相同测试"。把它视为 Provider 兼容性验证，而不是普通单元测试；受限网络下测试会以"端点网络不可达"SKIP（环境限制，非失败）。
 
 ## 文档站验证
 
