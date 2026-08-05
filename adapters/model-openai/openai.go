@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -305,7 +306,7 @@ func mapTransportError(err error) error {
 
 // mapHTTPError 将 HTTP 状态码映射为结构化 ModelError。
 func mapHTTPError(status int, body string) error {
-	msg := body
+	msg := redactSecrets(body)
 	if len(msg) > 300 {
 		msg = msg[:300]
 	}
@@ -321,4 +322,16 @@ func mapHTTPError(status int, body string) error {
 	default:
 		return &agentmodel.ModelError{Kind: agentmodel.ErrorKindUnknown, Message: msg}
 	}
+}
+
+var (
+	reBearer = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=\-]+`)
+	reSKKey  = regexp.MustCompile(`(?i)sk-[A-Za-z0-9\-_]{8,}`)
+)
+
+// redactSecrets 对错误响应体中的 Bearer token 与 sk- 风格密钥脱敏，
+// 防止上游在错误体回显 Authorization 头时把 key 带入日志/终端（NFR-004）。
+func redactSecrets(s string) string {
+	s = reBearer.ReplaceAllString(s, "Bearer [REDACTED]")
+	return reSKKey.ReplaceAllString(s, "sk-[REDACTED]")
 }

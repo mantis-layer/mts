@@ -72,13 +72,19 @@ func (FileReader) Execute(ctx context.Context, input map[string]any) (map[string
 
 // isForbiddenPath 判断路径是否指向密钥/环境配置文件，防止经
 // prompt injection 读取 .env.local 等敏感文件（NFR-004）。
+// 覆盖：.env 前缀（大小写不敏感）、SSH 私钥（id_rsa/id_ed25519/id_ecdsa/id_dsa，
+// 排除 .pub 公钥）、常见密钥扩展名。
 func isForbiddenPath(path string) bool {
 	base := filepath.Base(path)
-	if strings.HasPrefix(base, ".env") {
+	lower := strings.ToLower(base)
+	if strings.HasPrefix(lower, ".env") {
 		return true
 	}
-	switch strings.ToLower(filepath.Ext(base)) {
-	case ".pem", ".key", ".p12", ".pfx":
+	if strings.HasPrefix(lower, "id_") && !strings.HasSuffix(lower, ".pub") {
+		return true
+	}
+	switch filepath.Ext(lower) {
+	case ".pem", ".key", ".p12", ".pfx", ".ppk":
 		return true
 	}
 	return false
