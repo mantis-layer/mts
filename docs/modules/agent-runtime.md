@@ -147,7 +147,7 @@ type EvaluationResult struct { Passed bool; Score float64; Details map[string]an
 
 ### 事件（审计）
 
-`EventKind`：`taskrun.created/started/state_changed/completed/failed/cancelled`、`budget_exceeded`、`human_input_requested/received`、`checkpoint_saved`、`artifact.created`、`evaluator_result`。
+`EventKind`：`taskrun.created/started/state_changed/completed/failed/cancelled`、`taskrun.budget_exceeded`、`taskrun.human_input_requested/received`、`taskrun.checkpoint_saved`、`artifact.created`、`taskrun.evaluator_result`。
 
 ## 使用示例
 

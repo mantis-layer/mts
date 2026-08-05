@@ -85,13 +85,15 @@ kind: agent
 name: data-assistant
 model:
   provider: openai-compatible
-  base_url: ${MTS_BASEURL}
+  base_url: https://your-openai-compatible-endpoint/v1   # 注意：仅 api_key 做 ${ENV} 展开
   api_key: ${MTS_API_KEY}   # 禁止明文
   model: gpt-5.4
 tools:
   - file_reader
   - calculator
 ```
+
+> `ModelSpec.ResolveAPIKey` 只展开 `api_key` 的 `${ENV}` 引用；`base_url` 不展开，由调用方（如 `ModelFactory` 中的配置注入）处理。
 
 ```go
 m, _ := agentcompose.LoadManifest("agent.yaml")
