@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title">
+  <title>MTS</title>
+  <rect width="96" height="96" rx="20" fill="#2563eb"/>
+  <path d="M22 68V28h10l16 23 16-23h10v40H62V46L51 62h-6L34 46v22H22Z" fill="white"/>
+</svg>
