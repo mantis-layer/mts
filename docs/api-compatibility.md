@@ -85,11 +85,14 @@ agent-model / agent-core  ←  tools
 
 - `tools`：`FileReader`（JSON/CSV，密钥路径拦截）、`Calculator`（安全表达式求值）
 - `cli`：`mts` 命令（`MTS_BASEURL`/`MTS_API_KEY`/`MTS_MODEL` 配置、事件流输出）
-- `examples/tool_loop_agent`：≤300 行 Tool Loop 示例（S10）
+- `examples/`：三个 ≤300 行示例 Agent（Tool Loop / Research / Workflow）
+  - `examples/tool_loop_agent`：Tool Loop（131 行，PRD S10）
+  - `examples/research_agent`：ResearchPattern → 报告 Artifact + Evidence（184 行）
+  - `examples/workflow_agent`：WorkflowPattern + 人工审批（179 行）
 
 ## 示例与测试
 
 - 构建：`go build all`；测试：`go test ./...`（各 Module）；竞态：`go test -race ./...`（CI）
 - 依赖方向：`scripts/check-deps.sh`
 - 契约测试：`adapters/model-openai`（需 `MTS_BASEURL`/`MTS_API_KEY`/`MTS_MODEL`，无则 SKIP）
-- 三场景示例：ToolLoop（`examples/tool_loop_agent`）、Research / Workflow（`agent-runtime` 测试演示）
+- 三场景示例：ToolLoop（`examples/tool_loop_agent`）、Research（`examples/research_agent`）、Workflow（`examples/workflow_agent`）
