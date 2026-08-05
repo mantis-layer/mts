@@ -121,8 +121,8 @@ func TestFileReader_UnsupportedFormat(t *testing.T) {
 
 func TestFileReader_ForbiddenPath(t *testing.T) {
 	dir := t.TempDir()
-	// .env 类与密钥类文件禁止读取（NFR-004 防 prompt injection 泄露）
-	for _, name := range []string{".env.local", ".env", "server.key", "cert.pem"} {
+	// .env 类、SSH 私钥与密钥类文件禁止读取（NFR-004 防 prompt injection 泄露）
+	for _, name := range []string{".env.local", ".env", ".ENV", "server.key", "cert.pem", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "id_ed25519_sk", "id_ecdsa_sk", "ssh-key.ppk"} {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
 			t.Fatal(err)
@@ -133,6 +133,25 @@ func TestFileReader_ForbiddenPath(t *testing.T) {
 		if !asToolError(err, &te) || te.Code != "forbidden_path" {
 			t.Fatalf("%s: 期望 forbidden_path, 实际 %v", name, err)
 		}
+	}
+	// 公钥文件不因敏感拦截（允许路径层面检查通过；格式不支持则是另一回事）
+	pub := filepath.Join(dir, "id_rsa.pub")
+	if err := os.WriteFile(pub, []byte("ssh-rsa AAAA..."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := FileReader{}
+	_, err := f.Execute(context.Background(), map[string]any{"path": pub})
+	var te *agentcore.ToolError
+	if asToolError(err, &te) && te.Code == "forbidden_path" {
+		t.Fatalf("公钥不应被敏感拦截: %v", err)
+	}
+	// 合法数据文件（id_ 前缀）不得被误拦
+	legal := filepath.Join(dir, "id_2024_sales.json")
+	if err := os.WriteFile(legal, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Execute(context.Background(), map[string]any{"path": legal}); err != nil {
+		t.Fatalf("合法数据文件 id_2024_sales.json 不应被拦截: %v", err)
 	}
 }
 
