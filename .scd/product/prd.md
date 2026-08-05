@@ -2,7 +2,7 @@
 managed_by: scd-discovery
 status: approved
 version: 1
-updated_at: 2026-08-05T11:10:58+08:00
+updated_at: 2026-08-05T11:25:00+08:00
 approved_at: 2026-08-05T11:10:58+08:00
 ---
 
@@ -41,7 +41,7 @@ v0.1 核心命题：**三个执行模式明显不同的 Agent（Tool Loop / Rese
 
 v0.1 明确不做：自动 Agent Compiler；任意自然语言生成复杂 Graph；完整 Multi-Agent 调度平台；插件市场与商业结算；分布式大规模任务集群；自我训练/自我演化；全功能可视化编排器；通用长期人格记忆；生产级桌面 Agent 产品；复杂 Workflow DSL；所有语言的 SDK。
 
-P1 延后项（v0.1 不交付）：gRPC / ConnectRPC 传输、Docker Sandbox、PostgreSQL Adapter、Runtime Server、Web Console、独立进程插件、多语言 Client SDK。
+P1 延后项（v0.1 不交付）：gRPC / ConnectRPC 传输、Docker Sandbox、PostgreSQL Adapter、Runtime Server、Web Console、独立进程插件、Remote Agent Adapter、多语言 Client SDK。
 
 ## Core user journeys
 
