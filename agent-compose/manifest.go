@@ -90,7 +90,28 @@ func (m *AgentManifest) Validate() error {
 	if m.Model.Model == "" {
 		return &ManifestError{Code: "missing_model_name", Message: "model.model 不能为空"}
 	}
+	// 防明文密钥：api_key 若填写必须是 ${ENV} 引用形式（NFR-004）。
+	if k := strings.TrimSpace(m.Model.APIKey); k != "" && !isEnvRef(k) {
+		return &ManifestError{Code: "plaintext_api_key", Message: "model.api_key 必须使用 ${ENV_NAME} 引用，禁止明文密钥"}
+	}
 	return nil
+}
+
+// isEnvRef 判断字符串是否为 ${ENV_NAME} 引用形式。
+func isEnvRef(s string) bool {
+	if !strings.HasPrefix(s, "${") || !strings.HasSuffix(s, "}") {
+		return false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(s, "${"), "}")
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // ResolveAPIKey 展开 APIKey 中的 ${ENV} 引用；非引用形式（空/占位）原样返回。
