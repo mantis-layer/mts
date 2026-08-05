@@ -145,6 +145,14 @@ func TestFileReader_ForbiddenPath(t *testing.T) {
 	if asToolError(err, &te) && te.Code == "forbidden_path" {
 		t.Fatalf("公钥不应被敏感拦截: %v", err)
 	}
+	// 合法数据文件（id_ 前缀）不得被误拦
+	legal := filepath.Join(dir, "id_2024_sales.json")
+	if err := os.WriteFile(legal, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Execute(context.Background(), map[string]any{"path": legal}); err != nil {
+		t.Fatalf("合法数据文件 id_2024_sales.json 不应被拦截: %v", err)
+	}
 }
 
 func asToolError(err error, target **agentcore.ToolError) bool {
