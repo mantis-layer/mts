@@ -28,7 +28,8 @@ const (
 var allowedTransitions = map[RunState]map[RunState]bool{
 	RunStateCreated: {RunStateRunning: true, RunStateCancelled: true},
 	RunStateRunning: {RunStateWaiting: true, RunStateCompleted: true, RunStateFailed: true, RunStateCancelled: true},
-	RunStateWaiting: {RunStateRunning: true, RunStateCancelled: true},
+	// waiting 也可因 storage 故障等进入 failed（HITL 等待中执行环境异常）。
+	RunStateWaiting: {RunStateRunning: true, RunStateCancelled: true, RunStateFailed: true},
 }
 
 // CanTransition 判断 from → to 是否合法（FR-004 状态机）。

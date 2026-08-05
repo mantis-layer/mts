@@ -50,6 +50,51 @@ func newTestRuntime(t *testing.T, s Storage, b Budget) *Runtime {
 	return rt
 }
 
+// TestRuntime_CancelWithEvaluator 覆盖取消 vs Evaluator/completed 时序：
+// evaluator 期间外部取消不应被 UpdateRun 反转成 completed（H3 回归）。
+func TestRuntime_CancelWithEvaluator(t *testing.T) {
+	for _, s := range newTestStorage(t) {
+		rt := newTestRuntime(t, s, Budget{})
+		rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{{Done: true}}})
+		rt.RegisterEvaluator(&SchemaEvaluator{ArtifactName: "report"})
+		ctx := context.Background()
+		for i := 0; i < 30; i++ {
+			run, err := rt.SubmitTask(ctx, &Task{ID: "t" + itoa(i), Pattern: "mock", Input: "x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rt.AddArtifact(ctx, run.ID, "report", ArtifactJSON, `{"ok":true}`); err != nil {
+				t.Fatal(err)
+			}
+			var wg sync.WaitGroup
+			var mu sync.Mutex
+			var cancelState RunState
+			wg.Add(2)
+			go func() { defer wg.Done(); _, _ = rt.Run(ctx, run.ID) }()
+			go func() {
+				defer wg.Done()
+				c, err := rt.Cancel(ctx, run.ID)
+				if err == nil {
+					mu.Lock()
+					cancelState = c.State
+					mu.Unlock()
+				}
+			}()
+			wg.Wait()
+			final, err := rt.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			cs := cancelState
+			mu.Unlock()
+			if cs == RunStateCancelled && final.State != RunStateCancelled {
+				t.Fatalf("迭代 %d: Cancel 返回 cancelled 但终态 = %s（取消被反转）", i, final.State)
+			}
+		}
+	}
+}
+
 // ---- 并发安全（review blocking 修复验证） ----
 
 func TestRuntime_ConcurrentRun(t *testing.T) {
@@ -191,6 +236,30 @@ func TestSQLite_MemoryDSN(t *testing.T) {
 	}
 	if _, err := s.GetTask(ctx, "t1"); err != nil {
 		t.Fatalf("GetTask: %v", err)
+	}
+}
+
+// TestStorage_CreateRunDuplicate 双实现契约：重复 CreateRun 必须报错（H1）。
+func TestStorage_CreateRunDuplicate(t *testing.T) {
+	ctx := context.Background()
+	for _, s := range newTestStorage(t) {
+		run := &TaskRun{ID: "r1", TaskID: "t1", Pattern: "mock", State: RunStateCreated}
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		if err := s.CreateRun(ctx, run); err == nil {
+			t.Fatal("重复 CreateRun 应报错")
+		}
+	}
+}
+
+// TestStateMachine_WaitingToFailed 状态机补边（H4）。
+func TestStateMachine_WaitingToFailed(t *testing.T) {
+	if !CanTransition(RunStateWaiting, RunStateFailed) {
+		t.Fatal("waiting → failed 应合法")
+	}
+	if CanTransition(RunStateCompleted, RunStateRunning) {
+		t.Fatal("completed → running 应非法")
 	}
 }
 

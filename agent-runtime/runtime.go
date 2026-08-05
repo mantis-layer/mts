@@ -227,10 +227,16 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 				return cur, err
 			}
 			_ = rt.addEvent(ctx, run, EventHumanInputRequested, map[string]any{"prompt": step.HumanPrompt})
-			// Checkpoint：持久化等待状态
-			if err := rt.storage.UpdateRun(ctx, run); err != nil {
+			// Checkpoint：仅在 waiting 态可写——取消后（cancelled）不覆盖
+			if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateWaiting); err != nil {
 				_ = rt.fail(ctx, run, err)
 				return rt.storage.GetRun(ctx, runID)
+			} else if !ok {
+				cur, gerr := rt.storage.GetRun(ctx, runID)
+				if gerr != nil {
+					return nil, gerr
+				}
+				return cur, nil
 			}
 			_ = rt.addEvent(ctx, run, EventCheckpointSaved, nil)
 			return rt.storage.GetRun(ctx, runID)
@@ -239,9 +245,16 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		if step.Output != "" {
 			run.SummaryAppend(step.Output)
 		}
-		if err := rt.storage.UpdateRun(ctx, run); err != nil {
+		// Checkpoint：仅在 running 态可写——取消后（cancelled）不覆盖
+		if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateRunning); err != nil {
 			_ = rt.fail(ctx, run, err)
 			return rt.storage.GetRun(ctx, runID)
+		} else if !ok {
+			cur, gerr := rt.storage.GetRun(ctx, runID)
+			if gerr != nil {
+				return nil, gerr
+			}
+			return cur, nil
 		}
 		_ = rt.addEvent(ctx, run, EventCheckpointSaved, nil)
 
@@ -272,11 +285,20 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		_ = rt.fail(ctx, run, fmt.Errorf("Evaluator 验收未通过"))
 		return rt.storage.GetRun(ctx, runID)
 	}
+	// 先持久化 Result（含全部数据）再 CAS completed——
+	// UpdateRunIf(running) 在取消（cancelled）后不覆盖，Result 仅在正常完成路径写入。
+	if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateRunning); err != nil {
+		_ = rt.fail(ctx, run, err)
+		return rt.storage.GetRun(ctx, runID)
+	} else if !ok {
+		cur, gerr := rt.storage.GetRun(ctx, runID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		return cur, nil
+	}
 	if cur, err := rt.transitionOrReturn(ctx, run, RunStateCompleted); cur != nil {
 		return cur, err
-	}
-	if err := rt.storage.UpdateRun(ctx, run); err != nil {
-		return nil, err
 	}
 	_ = rt.addEvent(ctx, run, EventTaskRunCompleted, map[string]any{"summary": run.Result.Summary})
 	return rt.storage.GetRun(ctx, runID)
@@ -300,8 +322,15 @@ func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*
 		return nil, fmt.Errorf("agentruntime: 人工输入不能为空")
 	}
 	run.Input = input
-	if err := rt.storage.UpdateRun(ctx, run); err != nil {
+	// 仅在 waiting 态可写——取消后（cancelled）不复活 run
+	if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateWaiting); err != nil {
 		return nil, err
+	} else if !ok {
+		cur, gerr := rt.storage.GetRun(ctx, runID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		return cur, nil
 	}
 	_ = rt.addEvent(ctx, run, EventHumanInputReceived, map[string]any{"run_id": runID})
 	if cur, err := rt.transitionOrReturn(ctx, run, RunStateRunning); cur != nil {

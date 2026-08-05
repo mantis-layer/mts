@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite driver（无 CGO）
@@ -114,6 +115,56 @@ func (s *SQLiteStorage) UpdateRun(ctx context.Context, run *TaskRun) error {
 	return s.insertRun(ctx, run, true)
 }
 
+// UpdateRunIf SQLite 实现：UPDATE ... WHERE id=? AND state=? 原子更新。
+func (s *SQLiteStorage) UpdateRunIf(ctx context.Context, run *TaskRun, from RunState) (bool, error) {
+	usageJSON, err := json.Marshal(run.Usage)
+	if err != nil {
+		return false, fmt.Errorf("agentruntime: marshal usage: %w", err)
+	}
+	var resultJSON []byte
+	if run.Result != nil {
+		resultJSON, err = json.Marshal(run.Result)
+		if err != nil {
+			return false, fmt.Errorf("agentruntime: marshal result: %w", err)
+		}
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
+		 WHERE id=? AND state=?`,
+		run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
+		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano), run.ID, string(from))
+	if err != nil {
+		return false, fmt.Errorf("agentruntime: update run if: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		// 区分"run 不存在"与"状态已被并发修改"
+		if exists, err := s.runExists(ctx, run.ID); err != nil {
+			return false, err
+		} else if !exists {
+			return false, &NotFoundError{Kind: "run", ID: run.ID}
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *SQLiteStorage) runExists(ctx context.Context, id string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE id = ?`, id).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly bool) error {
 	usageJSON, err := json.Marshal(run.Usage)
 	if err != nil {
@@ -144,15 +195,24 @@ func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly 
 		return nil
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)
+		`INSERT INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
 		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
 		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
-		return fmt.Errorf("agentruntime: save run: %w", err)
+		// 与 MemoryStorage.CreateRun 契约一致：重复创建必须报错，不能静默覆盖。
+		if isUniqueViolation(err) {
+			return fmt.Errorf("agentruntime: run %s 已存在", run.ID)
+		}
+		return fmt.Errorf("agentruntime: create run: %w", err)
 	}
 	return nil
+}
+
+// isUniqueViolation 判断错误是否为 SQLite UNIQUE 约束冲突。
+func isUniqueViolation(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "unique")
 }
 
 func (s *SQLiteStorage) GetRun(ctx context.Context, id string) (*TaskRun, error) {
