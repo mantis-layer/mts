@@ -125,6 +125,7 @@ func (rt *Runtime) SubmitTask(ctx context.Context, task *Task) (*TaskRun, error)
 		TaskID:    task.ID,
 		Pattern:   task.Pattern,
 		State:     RunStateCreated,
+		TaskInput: task.Input,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -221,6 +222,63 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		run.ToolCalls += step.ToolCalls
 		mergeUsage(&run.Usage, step.Usage)
 		run.UpdatedAt = time.Now()
+		if step.Progress != "" {
+			run.Progress = step.Progress
+		}
+
+		// 业务终止（如审批拒绝）：按失败终态收敛，不进入完成/Evaluator 路径（S3）。
+		if step.Terminated {
+			_ = rt.fail(ctx, run, fmt.Errorf("流程终止: %s", step.Output))
+			return rt.storage.GetRun(ctx, runID)
+		}
+
+		// 原子落库本步骤产出的 Artifact 与 Evidence（S4：单事务，不留脏数据）
+		if len(step.Artifacts) > 0 || len(step.Evidence) > 0 {
+			arts := make([]Artifact, len(step.Artifacts))
+			copy(arts, step.Artifacts)
+			for i := range arts {
+				arts[i].ID = newID("art")
+				arts[i].TaskRunID = run.ID
+				if arts[i].CreatedAt.IsZero() {
+					arts[i].CreatedAt = time.Now()
+				}
+			}
+			// 名称 → 真实 ID：本步骤产物优先，miss 时补查 run 已有 Artifacts（S2）
+			byName := map[string]string{}
+			for _, a := range arts {
+				byName[a.Name] = a.ID
+			}
+			evs := make([]Evidence, 0, len(step.Evidence))
+			for _, ev := range step.Evidence {
+				id, ok := byName[ev.ArtifactID]
+				if !ok {
+					existing, err := rt.storage.Artifacts(ctx, run.ID)
+					if err != nil {
+						_ = rt.fail(ctx, run, err)
+						return rt.storage.GetRun(ctx, runID)
+					}
+					for _, a := range existing {
+						if a.Name == ev.ArtifactID {
+							id, ok = a.ID, true
+							break
+						}
+					}
+				}
+				if !ok {
+					_ = rt.fail(ctx, run, fmt.Errorf("evidence 引用未知 artifact %q", ev.ArtifactID))
+					return rt.storage.GetRun(ctx, runID)
+				}
+				ev.ArtifactID = id
+				evs = append(evs, ev)
+			}
+			if err := rt.storage.AddArtifactsEvidence(ctx, arts, evs); err != nil {
+				_ = rt.fail(ctx, run, err)
+				return rt.storage.GetRun(ctx, runID)
+			}
+			for _, a := range arts {
+				_ = rt.addEvent(ctx, run, EventArtifactCreated, map[string]any{"name": a.Name})
+			}
+		}
 
 		if step.NeedHuman {
 			if cur, err := rt.transitionOrReturn(ctx, run, RunStateWaiting); cur != nil {

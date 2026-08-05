@@ -30,6 +30,10 @@ type Storage interface {
 	AddEvidence(ctx context.Context, e *Evidence) error
 	Evidence(ctx context.Context, artifactID string) ([]Evidence, error)
 
+	// AddArtifactsEvidence 原子地写入一批 Artifact 与 Evidence（SQLite 单事务；
+	// 中途失败不留孤立数据）。Runtime 步骤产出统一走此方法。
+	AddArtifactsEvidence(ctx context.Context, arts []Artifact, evs []Evidence) error
+
 	// CompareAndSetState 原子地把 run 从 from 迁移到 to；若当前状态不是 from 返回 (false, nil)。
 	// 用于并发安全的状态迁移（外部 Cancel 与 Run 的状态机写不互相覆盖）。
 	CompareAndSetState(ctx context.Context, runID string, from, to RunState) (bool, error)
@@ -160,6 +164,19 @@ func (s *MemoryStorage) Evidence(_ context.Context, artifactID string) ([]Eviden
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]Evidence(nil), s.evidence[artifactID]...), nil
+}
+
+// AddArtifactsEvidence 内存实现：锁内批量写入（原子）。
+func (s *MemoryStorage) AddArtifactsEvidence(_ context.Context, arts []Artifact, evs []Evidence) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range arts {
+		s.artifacts[a.TaskRunID] = append(s.artifacts[a.TaskRunID], a)
+	}
+	for _, e := range evs {
+		s.evidence[e.ArtifactID] = append(s.evidence[e.ArtifactID], e)
+	}
+	return nil
 }
 
 // CompareAndSetState 内存实现：锁内检查当前状态。
