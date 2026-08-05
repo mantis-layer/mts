@@ -77,6 +77,8 @@ type ToolAdapter struct{ /* ... */ }
 func NewToolAdapter(client *Client, info ToolInfo, name string) *ToolAdapter // 实现 agentcore.Tool
 ```
 
+跨语言验证：`TestPythonServerInterop` 用 `examples/mcp/python_echo_server.py`（零依赖 Python MCP stdio server，实现 `initialize`/`tools/list`/`tools/call`）与 Go 客户端端到端联调——工具发现、工具调用、`ToolAdapter` 注册与执行全部通过（CI 含 python3 runner）。
+
 ## 使用示例
 
 ```go
