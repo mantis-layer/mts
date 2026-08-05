@@ -325,7 +325,9 @@ func mapHTTPError(status int, body string) error {
 }
 
 var (
-	reBearer = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=\-]+`)
+	// 仅在 Bearer 后跟已知 token 前缀或 ≥16 字符的连续 token 时脱敏，
+	// 避免误伤普通英文（如 "the bearer token is invalid"）。
+	reBearer = regexp.MustCompile(`(?i)\bbearer\s+(?:sk-[A-Za-z0-9\-_]+|ghp_[A-Za-z0-9]+|gho_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|[A-Za-z0-9._~+/=\-]{16,})`)
 	reSKKey  = regexp.MustCompile(`(?i)sk-[A-Za-z0-9\-_]{8,}`)
 )
 

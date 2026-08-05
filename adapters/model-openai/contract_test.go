@@ -216,8 +216,11 @@ func TestRedactSecrets(t *testing.T) {
 	}{
 		{`{"error":"unauthorized","auth":"Bearer sk-acw-92b51d2e-9bec066031ebac40"}`, `{"error":"unauthorized","auth":"Bearer [REDACTED]"}`},
 		{`token sk-proj-abcdefgh12345678 leaked`, `token sk-[REDACTED] leaked`},
-		{`Authorization: bearer abc123XYZ_-+/=`, `Authorization: Bearer [REDACTED]`},
+		{`Authorization: bearer abc123XYZ_-+/=ABCDEFGH`, `Authorization: Bearer [REDACTED]`},
 		{`clean message`, `clean message`},
+		// 普通英文不得被过度脱敏
+		{`the bearer token is invalid`, `the bearer token is invalid`},
+		{`bearer of the good news`, `bearer of the good news`},
 	}
 	for _, cse := range cases {
 		got := redactSecrets(cse.in)
