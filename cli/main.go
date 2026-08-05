@@ -137,8 +137,9 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// loadEnvFile 从当前目录向上（最多 4 层）查找并加载简单的 KEY=VALUE 环境文件
-// （不覆盖已存在的环境变量）。支持仓库根 .env.local 从子目录运行。
+// loadEnvFile 从当前目录向上查找 KEY=VALUE 环境文件（不覆盖已存在 env），
+// 并在仓库根（含 .git 或 go.mod）停止，防止读取仓库外祖先目录的
+// .env.local（凭证钓鱼向量，NFR-004）。
 func loadEnvFile(name string) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -147,21 +148,10 @@ func loadEnvFile(name string) {
 	for i := 0; i < 4; i++ {
 		candidate := filepath.Join(dir, name)
 		if data, err := os.ReadFile(candidate); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" || strings.HasPrefix(line, "#") {
-					continue
-				}
-				key, value, ok := strings.Cut(line, "=")
-				if !ok {
-					continue
-				}
-				key = strings.TrimSpace(key)
-				value = strings.TrimSpace(value)
-				if os.Getenv(key) == "" {
-					_ = os.Setenv(key, value)
-				}
-			}
+			loadEnvLines(string(data))
+			return
+		}
+		if isRepoRoot(dir) {
 			return
 		}
 		parent := filepath.Dir(dir)
@@ -169,5 +159,38 @@ func loadEnvFile(name string) {
 			return
 		}
 		dir = parent
+	}
+}
+
+// isRepoRoot 判断目录是否为仓库根（含 .git 或 go.work；module 子目录的
+// go.mod 不计，monorepo 根以 go.work 为特征）。
+func isRepoRoot(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
+		return true
+	}
+	return false
+}
+
+// loadEnvLines 解析 KEY=VALUE 行（支持可选的 export 前缀与引号）。
+func loadEnvLines(data string) {
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "export ")
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key != "" && os.Getenv(key) == "" {
+			_ = os.Setenv(key, value)
+		}
 	}
 }
