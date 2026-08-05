@@ -91,6 +91,8 @@ def main():
             msg = json.loads(line)
         except (json.JSONDecodeError, RecursionError):  # 超深嵌套 JSON 不崩溃
             continue
+        if not isinstance(msg, dict):  # 防御：裸数字/布尔/null 不崩溃
+            continue
         if "id" not in msg:  # notification
             continue
         try:
