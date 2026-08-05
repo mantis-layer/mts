@@ -21,7 +21,7 @@ agent-model / agent-core  ←  tools
 以上全部 ←  cli（入口）  ←  examples
 ```
 
-规则：**agent-model 不依赖任何内部 Module；agent-core 仅依赖 agent-model；任何 Module 不得依赖 agent-runtime**（Runtime 是上层）。`scripts/check-deps.sh` 在 CI 中自动执行。
+规则：**agent-model 不依赖任何内部 Module；agent-core 仅依赖 agent-model；任何 Module 不得依赖 agent-runtime**（Runtime 是上层；v0.1 的 `cli`/`examples` 尚不依赖 runtime，后续版本引入）。`scripts/check-deps.sh` 在 CI 中自动执行。
 
 ## 公共 API（v0.1）
 
@@ -42,7 +42,7 @@ agent-model / agent-core  ←  tools
 |---|---|
 | `Agent` + `Options`（OnEvent/Steering/ContextHook） | 模型↔工具循环，事件流、取消、预算 |
 | `Tool` 接口（Name/Description/Parameters/Execute） | 工具契约 |
-| `Registry`（Register/Get/List/Schemas） | 静态工具注册（唯一 ID） |
+| `Registry`（Register/Get/ListTools/Schemas） | 静态工具注册（唯一 ID） |
 | `Event` / `EventKind` | Agent 事件流 |
 | `Result`（FinalMessage/Usage/ToolCalls） | 运行结果 |
 | `ValidateJSONSchema` | 输入 Schema 校验（子集） |
@@ -67,7 +67,7 @@ agent-model / agent-core  ←  tools
 | 符号 | 说明 |
 |---|---|
 | `Task` / `TaskRun` / `RunState` | 任务与运行实例、状态机 |
-| `Runtime`（Submit/Run/Cancel/SubmitHumanInput/GetRun/Events） | 运行入口 |
+| `Runtime`（SubmitTask/Run/Cancel/SubmitHumanInput/GetRun/Events） | 运行入口 |
 | `Pattern` / `StepResult`（Done/NeedHuman/Terminated/Progress/Artifacts） | Pattern 宿主 |
 | `ToolLoopPattern` / `ResearchPattern` / `WorkflowPattern` | 内置三种 Pattern |
 | `Storage` 接口 + `MemoryStorage` / `SQLiteStorage` | 持久化（CAS 原子写） |

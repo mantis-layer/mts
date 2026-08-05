@@ -10,13 +10,12 @@ import (
 
 // BenchmarkAgentLoop 基准：agent-core Agent 单次 Tool Loop（mock 流式模型）。
 func BenchmarkAgentLoop(b *testing.B) {
-	m := &mockModel{streams: [][]agentmodel.StreamEvent{
-		{
-			{Kind: agentmodel.StreamEventDelta, Delta: "完成"},
-			{Kind: agentmodel.StreamEventUsage, Usage: &agentmodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
-			{Kind: agentmodel.StreamEventFinish, FinishReason: agentmodel.FinishReasonStop},
-		},
-	}}
+	stream := []agentmodel.StreamEvent{
+		{Kind: agentmodel.StreamEventDelta, Delta: "完成"},
+		{Kind: agentmodel.StreamEventUsage, Usage: &agentmodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
+		{Kind: agentmodel.StreamEventFinish, FinishReason: agentmodel.FinishReasonStop},
+	}
+	m := &mockModel{streams: [][]agentmodel.StreamEvent{stream, stream, stream, stream, stream}}
 	reg := agentcore.NewRegistry()
 	reg.Register(echoTool{})
 	agent := agentcore.New(m, reg, agentcore.Options{})
