@@ -4,4 +4,7 @@ reasonix.toml
 .env
 .env.*
 !.env.example
+/node_modules
 /cli/cli
+/docs/.vitepress/cache
+/docs/.vitepress/dist
