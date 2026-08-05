@@ -28,7 +28,7 @@ func (p *ResearchPattern) Name() string { return "research" }
 
 // Execute 运行一轮研究：调用 Agent 完成任务，产出报告 Artifact + Evidence。
 func (p *ResearchPattern) Execute(ctx context.Context, run *TaskRun) (*StepResult, error) {
-	input := run.Input
+	input := run.TaskInput
 	if input == "" {
 		input = "继续研究并输出结论"
 	}
