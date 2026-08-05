@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	agentmodel "github.com/mantis-layer/mts/agent-model"
@@ -49,6 +50,22 @@ func (r *Registry) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.tools)
+}
+
+// ListTools 返回全部已注册工具（按名称排序）。
+func (r *Registry) ListTools() []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.tools))
+	for n := range r.tools {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]Tool, 0, len(names))
+	for _, n := range names {
+		out = append(out, r.tools[n])
+	}
+	return out
 }
 
 // Schemas 返回全部工具的描述 Schema（供模型调用，FR-001/FR-003）。
