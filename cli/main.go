@@ -138,7 +138,7 @@ func truncate(s string, n int) string {
 }
 
 // loadEnvFile 从当前目录向上查找 KEY=VALUE 环境文件（不覆盖已存在 env），
-// 并在仓库根（含 .git 或 go.mod）停止，防止读取仓库外祖先目录的
+// 并在仓库根（含 .git 或 go.work）停止，防止读取仓库外祖先目录的
 // .env.local（凭证钓鱼向量，NFR-004）。
 func loadEnvFile(name string) {
 	dir, err := os.Getwd()
