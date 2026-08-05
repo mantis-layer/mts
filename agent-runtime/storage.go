@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Storage 是 TaskRun 持久化接口（FR-007）：
@@ -24,6 +25,10 @@ type Storage interface {
 	Artifacts(ctx context.Context, runID string) ([]Artifact, error)
 	AddEvidence(ctx context.Context, e *Evidence) error
 	Evidence(ctx context.Context, artifactID string) ([]Evidence, error)
+
+	// CompareAndSetState 原子地把 run 从 from 迁移到 to；若当前状态不是 from 返回 (false, nil)。
+	// 用于并发安全的状态迁移（外部 Cancel 与 Run 的状态机写不互相覆盖）。
+	CompareAndSetState(ctx context.Context, runID string, from, to RunState) (bool, error)
 
 	Close() error
 }
@@ -138,6 +143,21 @@ func (s *MemoryStorage) Evidence(_ context.Context, artifactID string) ([]Eviden
 	return append([]Evidence(nil), s.evidence[artifactID]...), nil
 }
 
+// CompareAndSetState 内存实现：锁内检查当前状态。
+func (s *MemoryStorage) CompareAndSetState(_ context.Context, runID string, from, to RunState) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return false, &NotFoundError{Kind: "run", ID: runID}
+	}
+	if r.State != from {
+		return false, nil
+	}
+	r.State = to
+	r.UpdatedAt = time.Now()
+	return true, nil
+}
 func (s *MemoryStorage) Close() error { return nil }
 
 // NotFoundError 是查询不存在对象的结构化错误。

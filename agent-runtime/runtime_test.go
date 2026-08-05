@@ -286,9 +286,9 @@ func TestRuntime_Cancel(t *testing.T) {
 	}
 }
 
-// TestRuntime_CancelStartupRace 覆盖 Cancel 与 Run 启动瞬间的交错：
-// Cancel 在 Run 注册取消函数前后到达都不应被吞（最终必为 cancelled 或 completed，
-// 且终态事件流与状态一致，不允许出现"已取消却跑成 completed"）。
+// TestRuntime_CancelStartupRace 覆盖 Cancel 与 Run 启动瞬间的交错。
+// 不变式：只要 Cancel 返回 cancelled，最终终态必须收敛为 cancelled
+// （防止旧 bug：注册窗口内取消被覆盖成 completed）。
 func TestRuntime_CancelStartupRace(t *testing.T) {
 	for _, s := range newTestStorage(t) {
 		rt := newTestRuntime(t, s, Budget{})
@@ -302,17 +302,37 @@ func TestRuntime_CancelStartupRace(t *testing.T) {
 				t.Fatal(err)
 			}
 			var wg sync.WaitGroup
+			var mu sync.Mutex
+			var cancelState RunState
 			wg.Add(2)
 			go func() { defer wg.Done(); _, _ = rt.Run(ctx, run.ID) }()
-			go func() { defer wg.Done(); _, _ = rt.Cancel(ctx, run.ID) }()
+			go func() {
+				defer wg.Done()
+				c, err := rt.Cancel(ctx, run.ID)
+				if err == nil {
+					mu.Lock()
+					cancelState = c.State
+					mu.Unlock()
+				}
+			}()
 			wg.Wait()
 
 			final, err := rt.GetRun(ctx, run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
+			mu.Lock()
+			cs := cancelState
+			mu.Unlock()
+			if final.State == RunStateRunning {
+				t.Fatalf("迭代 %d: 终态 = %s，Run 未收敛", i, final.State)
+			}
 			if final.State != RunStateCancelled && final.State != RunStateCompleted {
-				t.Fatalf("迭代 %d: 终态 = %s，期望 cancelled 或 completed", i, final.State)
+				t.Fatalf("迭代 %d: 终态 = %s（cs=%s），期望 cancelled 或 completed", i, final.State, cs)
+			}
+			// 不变式：Cancel 返回 cancelled → 终态必为 cancelled（防止取消被覆盖）
+			if cs == RunStateCancelled && final.State != RunStateCancelled {
+				t.Fatalf("迭代 %d: Cancel 返回 cancelled 但终态 = %s（取消被覆盖）", i, final.State)
 			}
 		}
 	}

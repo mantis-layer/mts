@@ -181,8 +181,8 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 	}
 
 	if run.State != RunStateRunning {
-		if err := rt.transition(ctx, run, RunStateRunning); err != nil {
-			return nil, err
+		if cur, err := rt.transitionOrReturn(ctx, run, RunStateRunning); cur != nil {
+			return cur, err
 		}
 		_ = rt.addEvent(ctx, run, EventTaskRunStarted, nil)
 	}
@@ -222,8 +222,8 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		run.UpdatedAt = time.Now()
 
 		if step.NeedHuman {
-			if err := rt.transition(ctx, run, RunStateWaiting); err != nil {
-				return nil, err
+			if cur, err := rt.transitionOrReturn(ctx, run, RunStateWaiting); cur != nil {
+				return cur, err
 			}
 			_ = rt.addEvent(ctx, run, EventHumanInputRequested, map[string]any{"prompt": step.HumanPrompt})
 			// Checkpoint：持久化等待状态
@@ -271,8 +271,8 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		_ = rt.fail(ctx, run, fmt.Errorf("Evaluator 验收未通过"))
 		return rt.storage.GetRun(ctx, runID)
 	}
-	if err := rt.transition(ctx, run, RunStateCompleted); err != nil {
-		return nil, err
+	if cur, err := rt.transitionOrReturn(ctx, run, RunStateCompleted); cur != nil {
+		return cur, err
 	}
 	if err := rt.storage.UpdateRun(ctx, run); err != nil {
 		return nil, err
@@ -303,8 +303,8 @@ func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*
 		return nil, err
 	}
 	_ = rt.addEvent(ctx, run, EventHumanInputReceived, map[string]any{"run_id": runID})
-	if err := rt.transition(ctx, run, RunStateRunning); err != nil {
-		return nil, err
+	if cur, err := rt.transitionOrReturn(ctx, run, RunStateRunning); cur != nil {
+		return cur, err
 	}
 	// 已持 per-run 锁，直接执行（不重复加锁）
 	return rt.runLocked(ctx, runID)
@@ -372,10 +372,37 @@ func (rt *Runtime) transition(ctx context.Context, run *TaskRun, to RunState) er
 		return &StateError{From: run.State, To: to, Op: "transition"}
 	}
 	from := run.State
+	// 原子 CAS：若 storage 状态已被并发修改（如外部 Cancel 写 cancelled），
+	// 本迁移失败且不会覆盖；调用方据此收敛。
+	sc := context.WithoutCancel(ctx)
+	ok, err := rt.storage.CompareAndSetState(sc, run.ID, from, to)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if cur, gerr := rt.storage.GetRun(sc, run.ID); gerr == nil {
+			run.State = cur.State
+			run.UpdatedAt = cur.UpdatedAt
+		}
+		return &StateError{From: from, To: to, Op: "transition (状态已被并发修改)"}
+	}
 	run.State = to
 	run.UpdatedAt = time.Now()
-	_ = rt.addEvent(ctx, run, EventStateChanged, map[string]any{"from": from, "to": to})
-	return rt.storage.UpdateRun(ctx, run)
+	_ = rt.addEvent(sc, run, EventStateChanged, map[string]any{"from": from, "to": to})
+	return nil
+}
+
+// transitionOrReturn 执行状态迁移；若迁移因并发修改（如外部取消）失败，
+// 返回 storage 中的最新状态（调用方应直接返回该状态）。
+func (rt *Runtime) transitionOrReturn(ctx context.Context, run *TaskRun, to RunState) (*TaskRun, error) {
+	if err := rt.transition(ctx, run, to); err != nil {
+		cur, gerr := rt.storage.GetRun(context.WithoutCancel(ctx), run.ID)
+		if gerr != nil {
+			return nil, err
+		}
+		return cur, nil
+	}
+	return nil, nil
 }
 
 func (rt *Runtime) fail(ctx context.Context, run *TaskRun, err error) error {

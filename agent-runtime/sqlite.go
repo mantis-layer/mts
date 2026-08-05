@@ -26,10 +26,15 @@ func NewSQLiteStorage(path string) (*SQLiteStorage, error) {
 			return nil, fmt.Errorf("agentruntime: 创建目录: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", path)
+	dsn := path + "?_pragma=busy_timeout(10000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("agentruntime: 打开 sqlite: %w", err)
 	}
+	// SQLite 是单写者模型：限制为单连接，避免并发写触发
+	// "database is locked"（Runtime 的并发 Cancel/Run 会同时写 storage）。
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("agentruntime: sqlite ping: %w", err)
@@ -268,6 +273,21 @@ func (s *SQLiteStorage) Evidence(ctx context.Context, artifactID string) ([]Evid
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// CompareAndSetState SQLite 实现：UPDATE ... WHERE state=? 的原子 CAS。
+func (s *SQLiteStorage) CompareAndSetState(ctx context.Context, runID string, from, to RunState) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET state=?, updated_at=? WHERE id=? AND state=?`,
+		string(to), time.Now().Format(time.RFC3339Nano), runID, string(from))
+	if err != nil {
+		return false, fmt.Errorf("agentruntime: cas state: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (s *SQLiteStorage) Close() error { return s.db.Close() }
