@@ -18,6 +18,10 @@ type Storage interface {
 	UpdateRun(ctx context.Context, run *TaskRun) error
 	GetRun(ctx context.Context, id string) (*TaskRun, error)
 
+	// UpdateRunIf 只在 run 当前状态为 from 时原子更新全部字段；
+	// 状态已被并发修改（如外部取消）返回 (false, nil)，不覆盖。
+	UpdateRunIf(ctx context.Context, run *TaskRun, from RunState) (bool, error)
+
 	AddEvent(ctx context.Context, ev *RuntimeEvent) error
 	Events(ctx context.Context, runID string) ([]RuntimeEvent, error)
 
@@ -90,6 +94,21 @@ func (s *MemoryStorage) UpdateRun(_ context.Context, run *TaskRun) error {
 	}
 	s.runs[run.ID] = run.Clone()
 	return nil
+}
+
+// UpdateRunIf 内存实现：锁内校验当前状态。
+func (s *MemoryStorage) UpdateRunIf(_ context.Context, run *TaskRun, from RunState) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.runs[run.ID]
+	if !ok {
+		return false, &NotFoundError{Kind: "run", ID: run.ID}
+	}
+	if cur.State != from {
+		return false, nil
+	}
+	s.runs[run.ID] = run.Clone()
+	return true, nil
 }
 
 func (s *MemoryStorage) GetRun(_ context.Context, id string) (*TaskRun, error) {

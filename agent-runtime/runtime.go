@@ -226,16 +226,17 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 			if cur, err := rt.transitionOrReturn(ctx, run, RunStateWaiting); cur != nil {
 				return cur, err
 			}
-			// 持久化前复查取消：pattern 执行期间外部取消应先收敛为 cancelled。
-			if err := runCtx.Err(); err != nil {
-				_ = rt.cancelRun(runCtx, run, "context cancelled")
-				return rt.storage.GetRun(ctx, runID)
-			}
 			_ = rt.addEvent(ctx, run, EventHumanInputRequested, map[string]any{"prompt": step.HumanPrompt})
-			// Checkpoint：持久化等待状态
-			if err := rt.storage.UpdateRun(ctx, run); err != nil {
+			// Checkpoint：仅在 waiting 态可写——取消后（cancelled）不覆盖
+			if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateWaiting); err != nil {
 				_ = rt.fail(ctx, run, err)
 				return rt.storage.GetRun(ctx, runID)
+			} else if !ok {
+				cur, gerr := rt.storage.GetRun(ctx, runID)
+				if gerr != nil {
+					return nil, gerr
+				}
+				return cur, nil
 			}
 			_ = rt.addEvent(ctx, run, EventCheckpointSaved, nil)
 			return rt.storage.GetRun(ctx, runID)
@@ -244,14 +245,16 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		if step.Output != "" {
 			run.SummaryAppend(step.Output)
 		}
-		// 持久化前复查取消：取消优先于 checkpoint（不映射为 failed）。
-		if err := runCtx.Err(); err != nil {
-			_ = rt.cancelRun(runCtx, run, "context cancelled")
-			return rt.storage.GetRun(ctx, runID)
-		}
-		if err := rt.storage.UpdateRun(ctx, run); err != nil {
+		// Checkpoint：仅在 running 态可写——取消后（cancelled）不覆盖
+		if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateRunning); err != nil {
 			_ = rt.fail(ctx, run, err)
 			return rt.storage.GetRun(ctx, runID)
+		} else if !ok {
+			cur, gerr := rt.storage.GetRun(ctx, runID)
+			if gerr != nil {
+				return nil, gerr
+			}
+			return cur, nil
 		}
 		_ = rt.addEvent(ctx, run, EventCheckpointSaved, nil)
 
@@ -283,10 +286,16 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		return rt.storage.GetRun(ctx, runID)
 	}
 	// 先持久化 Result（含全部数据）再 CAS completed——
-	// 避免 CAS 成功后 UpdateRun 失败导致 Result 静默丢失。
-	if err := rt.storage.UpdateRun(ctx, run); err != nil {
+	// UpdateRunIf(running) 在取消（cancelled）后不覆盖，Result 仅在正常完成路径写入。
+	if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateRunning); err != nil {
 		_ = rt.fail(ctx, run, err)
 		return rt.storage.GetRun(ctx, runID)
+	} else if !ok {
+		cur, gerr := rt.storage.GetRun(ctx, runID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		return cur, nil
 	}
 	if cur, err := rt.transitionOrReturn(ctx, run, RunStateCompleted); cur != nil {
 		return cur, err
@@ -313,8 +322,15 @@ func (rt *Runtime) SubmitHumanInput(ctx context.Context, runID, input string) (*
 		return nil, fmt.Errorf("agentruntime: 人工输入不能为空")
 	}
 	run.Input = input
-	if err := rt.storage.UpdateRun(ctx, run); err != nil {
+	// 仅在 waiting 态可写——取消后（cancelled）不复活 run
+	if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateWaiting); err != nil {
 		return nil, err
+	} else if !ok {
+		cur, gerr := rt.storage.GetRun(ctx, runID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		return cur, nil
 	}
 	_ = rt.addEvent(ctx, run, EventHumanInputReceived, map[string]any{"run_id": runID})
 	if cur, err := rt.transitionOrReturn(ctx, run, RunStateRunning); cur != nil {

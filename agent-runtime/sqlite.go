@@ -115,6 +115,56 @@ func (s *SQLiteStorage) UpdateRun(ctx context.Context, run *TaskRun) error {
 	return s.insertRun(ctx, run, true)
 }
 
+// UpdateRunIf SQLite 实现：UPDATE ... WHERE id=? AND state=? 原子更新。
+func (s *SQLiteStorage) UpdateRunIf(ctx context.Context, run *TaskRun, from RunState) (bool, error) {
+	usageJSON, err := json.Marshal(run.Usage)
+	if err != nil {
+		return false, fmt.Errorf("agentruntime: marshal usage: %w", err)
+	}
+	var resultJSON []byte
+	if run.Result != nil {
+		resultJSON, err = json.Marshal(run.Result)
+		if err != nil {
+			return false, fmt.Errorf("agentruntime: marshal result: %w", err)
+		}
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
+		 WHERE id=? AND state=?`,
+		run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
+		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano), run.ID, string(from))
+	if err != nil {
+		return false, fmt.Errorf("agentruntime: update run if: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		// 区分"run 不存在"与"状态已被并发修改"
+		if exists, err := s.runExists(ctx, run.ID); err != nil {
+			return false, err
+		} else if !exists {
+			return false, &NotFoundError{Kind: "run", ID: run.ID}
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *SQLiteStorage) runExists(ctx context.Context, id string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE id = ?`, id).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly bool) error {
 	usageJSON, err := json.Marshal(run.Usage)
 	if err != nil {
