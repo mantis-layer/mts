@@ -67,6 +67,13 @@ func TestResearchPattern(t *testing.T) {
 		if final.ToolCalls != 1 {
 			t.Fatalf("ToolCalls = %d", final.ToolCalls)
 		}
+		// 输入透传：任务输入应作为用户消息传给模型（review should-fix 回归）
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if len(m.requests) == 0 || len(m.requests[0].Messages) == 0 ||
+			m.requests[0].Messages[0].Content != "分析 /tmp/x.json 并输出报告" {
+			t.Fatalf("模型收到输入 = %+v", m.requests)
+		}
 	}
 }
 

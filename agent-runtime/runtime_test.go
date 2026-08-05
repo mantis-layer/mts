@@ -601,18 +601,20 @@ func (echoTool) Execute(_ context.Context, input map[string]any) (map[string]any
 }
 
 type mockModel struct {
-	mu      sync.Mutex
-	streams [][]agentmodel.StreamEvent
-	calls   int
+	mu       sync.Mutex
+	streams  [][]agentmodel.StreamEvent
+	calls    int
+	requests []agentmodel.Request
 }
 
 func (m *mockModel) Complete(_ context.Context, _ agentmodel.Request) (agentmodel.Response, error) {
 	return agentmodel.Response{}, nil
 }
 
-func (m *mockModel) Stream(_ context.Context, _ agentmodel.Request) (<-chan agentmodel.StreamEvent, error) {
+func (m *mockModel) Stream(_ context.Context, req agentmodel.Request) (<-chan agentmodel.StreamEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.requests = append(m.requests, req)
 	var seq []agentmodel.StreamEvent
 	if m.calls < len(m.streams) {
 		seq = m.streams[m.calls]

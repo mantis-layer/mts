@@ -56,9 +56,9 @@ func NewToolLoopPattern(agent *agentcore.Agent) *ToolLoopPattern {
 // Name 返回 Pattern 名。
 func (p *ToolLoopPattern) Name() string { return "tool_loop" }
 
-// Execute 把 run.Input 作为用户消息运行一次 Agent。
+// Execute 把任务输入作为用户消息运行一次 Agent。
 func (p *ToolLoopPattern) Execute(ctx context.Context, run *TaskRun) (*StepResult, error) {
-	input := run.Input
+	input := run.TaskInput
 	if input == "" {
 		input = "继续执行"
 	}
