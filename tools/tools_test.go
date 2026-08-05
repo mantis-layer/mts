@@ -122,7 +122,7 @@ func TestFileReader_UnsupportedFormat(t *testing.T) {
 func TestFileReader_ForbiddenPath(t *testing.T) {
 	dir := t.TempDir()
 	// .env 类、SSH 私钥与密钥类文件禁止读取（NFR-004 防 prompt injection 泄露）
-	for _, name := range []string{".env.local", ".env", ".ENV", "server.key", "cert.pem", "id_rsa", "id_ed25519", "id_ecdsa", "ssh-key.ppk"} {
+	for _, name := range []string{".env.local", ".env", ".ENV", "server.key", "cert.pem", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "id_ed25519_sk", "id_ecdsa_sk", "ssh-key.ppk"} {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
 			t.Fatal(err)
