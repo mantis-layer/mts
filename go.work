@@ -8,6 +8,8 @@ use (
 	./agent-plugin
 	./agent-runtime
 	./cli
+	./examples/research_agent
 	./examples/tool_loop_agent
+	./examples/workflow_agent
 	./tools
 )

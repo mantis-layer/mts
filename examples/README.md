@@ -1,19 +1,35 @@
 # Tool Loop Agent 示例
 
-本目录包含 Tool Loop 垂直切片的示例输入与 S10 验证示例。
+本目录包含 v0.1 发布的三类示例 Agent（Tool Loop / Research / Workflow），
+每例均 ≤300 行、不改 `agent-core` 源码、可独立构建运行。
 
 ## 目录
 
 - `data.json` — 示例销售数据
-- `tool_loop_agent/` — **PRD S10 验证示例**：131 行 Go 代码（≤300 行），不改 `agent-core`
-  源码，用 `agent-compose` Builder + OpenAI 兼容 adapter + 官方 tools 创建并跑通 Tool Loop Agent。
+- `tool_loop_agent/` — **Tool Loop 示例**（131 行）：`agent-compose` Builder + OpenAI
+  兼容 adapter + 官方 tools 创建并跑通 Tool Loop Agent（PRD S10 验证）。
+- `research_agent/` — **Research 示例**（173 行）：`agent-runtime` ResearchPattern 多轮
+  研究 → 报告 Artifact + Evidence → `EvidenceCoverageEvaluator` 验收。
+- `workflow_agent/` — **Workflow 示例**（170 行）：`agent-runtime` WorkflowPattern 多步骤
+  工作流（读取 → 人工审批 → 汇总），展示 WAITING_HUMAN 暂停与恢复。
+- `mcp/python_echo_server.py` — MCP 跨语言联调用零依赖 Python MCP stdio server。
 - `README.md` — 本文档
 
 ## 本地运行
 
 ```bash
+# Tool Loop（需模型配置）
 cd examples/tool_loop_agent
 go run . --task "读取 ../data.json，用 calculator 计算 sales 总和并给出中文摘要"
+
+# Research（需模型配置）
+cd examples/research_agent
+go run . --task "读取 ../data.json，分析销售趋势并输出中文研究报告"
+
+# Workflow（无需模型；--approve 自动批准人工审批）
+cd examples/workflow_agent
+go run . --approve
+
 # 配置：MTS_BASEURL / MTS_API_KEY / MTS_MODEL（或 --baseurl/--api-key/--model）
 # 自动加载仓库根 .env.local；需要代理时先 export HTTPS_PROXY=...
 ```
