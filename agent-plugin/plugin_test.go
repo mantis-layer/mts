@@ -50,7 +50,7 @@ type fakeModelPlugin struct {
 	model    agentmodel.Model
 }
 
-func (p *fakeModelPlugin) Manifest() PluginManifest { return p.manifest }
+func (p *fakeModelPlugin) Manifest() PluginManifest     { return p.manifest }
 func (p *fakeModelPlugin) Init(_ context.Context) error { return nil }
 func (p *fakeModelPlugin) Close() error                 { return nil }
 func (p *fakeModelPlugin) Model() (agentmodel.Model, error) {
@@ -75,10 +75,10 @@ func (m *fakeModel) Stream(_ context.Context, _ agentmodel.Request) (<-chan agen
 
 func validManifest(name string, typ PluginType) PluginManifest {
 	return PluginManifest{
-		Name:       name,
-		Version:    "1.0.0",
-		APIVersion: CurrentAPIVersion,
-		Type:       typ,
+		Name:        name,
+		Version:     "1.0.0",
+		APIVersion:  CurrentAPIVersion,
+		Type:        typ,
 		Permissions: []string{"file:read"},
 	}
 }

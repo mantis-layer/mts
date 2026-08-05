@@ -58,7 +58,7 @@ func main() {
 						"name":        "echo",
 						"description": "回显输入文本",
 						"inputSchema": map[string]any{
-							"type":     "object",
+							"type": "object",
 							"properties": map[string]any{
 								"text": map[string]any{"type": "string"},
 							},

@@ -9,9 +9,9 @@ import (
 
 // ToolAdapter 把 MCP server 的一个工具包装为 agent-core Tool（FR-006）。
 type ToolAdapter struct {
-	client    *Client
-	info      ToolInfo
-	name      string
+	client *Client
+	info   ToolInfo
+	name   string
 }
 
 // NewToolAdapter 从 ToolInfo 构造 ToolAdapter。name 为空时使用 info.Name。

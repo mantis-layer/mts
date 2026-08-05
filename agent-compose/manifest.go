@@ -207,13 +207,13 @@ func (m AgentManifest) MarshalJSON() ([]byte, error) {
 		Model    string `json:"model"`
 	}
 	safe := struct {
-		APIVersion  string     `json:"api_version"`
-		Kind        string     `json:"kind"`
-		Name        string     `json:"name"`
-		Model       safeModel  `json:"model"`
-		Tools       []string   `json:"tools"`
-		Pattern     string     `json:"pattern,omitempty"`
-		Permissions []string   `json:"permissions,omitempty"`
+		APIVersion  string    `json:"api_version"`
+		Kind        string    `json:"kind"`
+		Name        string    `json:"name"`
+		Model       safeModel `json:"model"`
+		Tools       []string  `json:"tools"`
+		Pattern     string    `json:"pattern,omitempty"`
+		Permissions []string  `json:"permissions,omitempty"`
 	}{
 		APIVersion:  m.APIVersion,
 		Kind:        m.Kind,
