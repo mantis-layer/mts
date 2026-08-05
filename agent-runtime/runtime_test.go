@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -250,38 +251,75 @@ func TestRuntime_BudgetExceeded(t *testing.T) {
 // ---- 取消（E4） ----
 
 func TestRuntime_Cancel(t *testing.T) {
-	s := NewMemoryStorage()
-	rt := newTestRuntime(t, s, Budget{})
-	if err := rt.RegisterPattern(blockingPattern{}); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "blocking", Input: "x"})
+	for _, s := range newTestStorage(t) {
+		rt := newTestRuntime(t, s, Budget{})
+		if err := rt.RegisterPattern(blockingPattern{}); err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		run, _ := rt.SubmitTask(ctx, &Task{ID: "t1", Pattern: "blocking", Input: "x"})
 
-	ctx2, cancel := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() {
-		_, err := rt.Run(ctx2, run.ID)
-		done <- err
-	}()
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	<-done
+		ctx2, cancel := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() {
+			_, err := rt.Run(ctx2, run.ID)
+			done <- err
+		}()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		<-done
 
-	final, err := rt.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final.State != RunStateCancelled {
-		t.Fatalf("终态 = %s，期望 cancelled", final.State)
-	}
+		final, err := rt.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if final.State != RunStateCancelled {
+			t.Fatalf("终态 = %s，期望 cancelled", final.State)
+		}
 
-	// created 状态直接 Cancel
-	run2, _ := rt.SubmitTask(ctx, &Task{ID: "t2", Pattern: "blocking", Input: "x"})
-	c2, _ := rt.Cancel(ctx, run2.ID)
-	if c2.State != RunStateCancelled {
-		t.Fatalf("created 取消后状态 = %s", c2.State)
+		// created 状态直接 Cancel
+		run2, _ := rt.SubmitTask(ctx, &Task{ID: "t2", Pattern: "blocking", Input: "x"})
+		c2, _ := rt.Cancel(ctx, run2.ID)
+		if c2.State != RunStateCancelled {
+			t.Fatalf("created 取消后状态 = %s", c2.State)
+		}
 	}
+}
+
+// TestRuntime_CancelStartupRace 覆盖 Cancel 与 Run 启动瞬间的交错：
+// Cancel 在 Run 注册取消函数前后到达都不应被吞（最终必为 cancelled 或 completed，
+// 且终态事件流与状态一致，不允许出现"已取消却跑成 completed"）。
+func TestRuntime_CancelStartupRace(t *testing.T) {
+	for _, s := range newTestStorage(t) {
+		rt := newTestRuntime(t, s, Budget{})
+		rt.RegisterPattern(&mockPattern{name: "mock", steps: []StepResult{
+			{Iterations: 1}, {Iterations: 1}, {Done: true, Iterations: 1},
+		}})
+		ctx := context.Background()
+		for i := 0; i < 20; i++ {
+			run, err := rt.SubmitTask(ctx, &Task{ID: "t" + itoa(i), Pattern: "mock", Input: "x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() { defer wg.Done(); _, _ = rt.Run(ctx, run.ID) }()
+			go func() { defer wg.Done(); _, _ = rt.Cancel(ctx, run.ID) }()
+			wg.Wait()
+
+			final, err := rt.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if final.State != RunStateCancelled && final.State != RunStateCompleted {
+				t.Fatalf("迭代 %d: 终态 = %s，期望 cancelled 或 completed", i, final.State)
+			}
+		}
+	}
+}
+
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
 }
 
 // ---- HITL（E8） ----

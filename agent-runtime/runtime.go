@@ -161,16 +161,24 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		return run, fmt.Errorf("agentruntime: run %s 处于 waiting，需 SubmitHumanInput 后重试", runID)
 	}
 
-	// 注册取消函数：必须在状态转移之前注册，
-	// 否则 transition(running) 到 registerCancel 之间存在窗口：
-	// 外部 Cancel 此时读到 running 但 cancelExecuting 返回 false，
-	// 其写入的 cancelled 会被 Run 后续 UpdateRun 覆盖（用户取消被吞）。
+	// 注册取消函数：必须在状态转移之前注册，并在转移前重读 storage——
+	// 若 Cancel 恰在注册窗口内写入 cancelled，重读能发现并放弃执行，
+	// 避免后续 transition/checkpoint 覆盖用户取消。
 	runCtx, cancelFn := context.WithCancel(ctx)
 	rt.registerCancel(runID, cancelFn)
 	defer func() {
 		cancelFn()
 		rt.unregisterCancel(runID)
 	}()
+
+	cur, err := rt.storage.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if cur.State == RunStateCancelled {
+		cancelFn()
+		return cur, nil
+	}
 
 	if run.State != RunStateRunning {
 		if err := rt.transition(ctx, run, RunStateRunning); err != nil {
