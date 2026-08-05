@@ -44,6 +44,8 @@ TOOLS = [
 def handle_request(msg):
     method = msg.get("method")
     params = msg.get("params") or {}
+    if not isinstance(params, dict):  # 防御：非对象 params
+        params = {}
     if method == "initialize":
         return {
             "protocolVersion": "2024-11-05",
@@ -70,7 +72,7 @@ def handle_request(msg):
                 "content": [{"type": "text", "text": f"未知工具: {name}"}],
                 "isError": True,
             }
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError, AttributeError) as exc:
             # 非法参数不得使 server 进程崩溃：返回 isError（协议级容错）。
             return {
                 "content": [{"type": "text", "text": f"参数错误: {exc}"}],
@@ -87,11 +89,20 @@ def main():
             continue
         try:
             msg = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):  # 超深嵌套 JSON 不崩溃
             continue
         if "id" not in msg:  # notification
             continue
-        result = handle_request(msg)
+        try:
+            result = handle_request(msg)
+        except Exception as exc:  # 兜底：任何未预期异常 → 标准内部错误
+            sys.stdout.write(json.dumps({
+                "jsonrpc": "2.0",
+                "id": msg["id"],
+                "error": {"code": -32603, "message": f"internal error: {exc}"},
+            }) + "\n")
+            sys.stdout.flush()
+            continue
         if result is None:  # 未知方法：返回 JSON-RPC method not found
             sys.stdout.write(json.dumps({
                 "jsonrpc": "2.0",
