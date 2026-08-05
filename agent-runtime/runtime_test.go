@@ -194,6 +194,30 @@ func TestSQLite_MemoryDSN(t *testing.T) {
 	}
 }
 
+// TestStorage_CreateRunDuplicate 双实现契约：重复 CreateRun 必须报错（H1）。
+func TestStorage_CreateRunDuplicate(t *testing.T) {
+	ctx := context.Background()
+	for _, s := range newTestStorage(t) {
+		run := &TaskRun{ID: "r1", TaskID: "t1", Pattern: "mock", State: RunStateCreated}
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		if err := s.CreateRun(ctx, run); err == nil {
+			t.Fatal("重复 CreateRun 应报错")
+		}
+	}
+}
+
+// TestStateMachine_WaitingToFailed 状态机补边（H4）。
+func TestStateMachine_WaitingToFailed(t *testing.T) {
+	if !CanTransition(RunStateWaiting, RunStateFailed) {
+		t.Fatal("waiting → failed 应合法")
+	}
+	if CanTransition(RunStateCompleted, RunStateRunning) {
+		t.Fatal("completed → running 应非法")
+	}
+}
+
 // ---- 状态机生命周期（E1） ----
 
 func TestRuntime_StateMachineLifecycle(t *testing.T) {

@@ -226,6 +226,11 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 			if cur, err := rt.transitionOrReturn(ctx, run, RunStateWaiting); cur != nil {
 				return cur, err
 			}
+			// 持久化前复查取消：pattern 执行期间外部取消应先收敛为 cancelled。
+			if err := runCtx.Err(); err != nil {
+				_ = rt.cancelRun(runCtx, run, "context cancelled")
+				return rt.storage.GetRun(ctx, runID)
+			}
 			_ = rt.addEvent(ctx, run, EventHumanInputRequested, map[string]any{"prompt": step.HumanPrompt})
 			// Checkpoint：持久化等待状态
 			if err := rt.storage.UpdateRun(ctx, run); err != nil {
@@ -238,6 +243,11 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 
 		if step.Output != "" {
 			run.SummaryAppend(step.Output)
+		}
+		// 持久化前复查取消：取消优先于 checkpoint（不映射为 failed）。
+		if err := runCtx.Err(); err != nil {
+			_ = rt.cancelRun(runCtx, run, "context cancelled")
+			return rt.storage.GetRun(ctx, runID)
 		}
 		if err := rt.storage.UpdateRun(ctx, run); err != nil {
 			_ = rt.fail(ctx, run, err)
@@ -272,11 +282,14 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		_ = rt.fail(ctx, run, fmt.Errorf("Evaluator 验收未通过"))
 		return rt.storage.GetRun(ctx, runID)
 	}
+	// 先持久化 Result（含全部数据）再 CAS completed——
+	// 避免 CAS 成功后 UpdateRun 失败导致 Result 静默丢失。
+	if err := rt.storage.UpdateRun(ctx, run); err != nil {
+		_ = rt.fail(ctx, run, err)
+		return rt.storage.GetRun(ctx, runID)
+	}
 	if cur, err := rt.transitionOrReturn(ctx, run, RunStateCompleted); cur != nil {
 		return cur, err
-	}
-	if err := rt.storage.UpdateRun(ctx, run); err != nil {
-		return nil, err
 	}
 	_ = rt.addEvent(ctx, run, EventTaskRunCompleted, map[string]any{"summary": run.Result.Summary})
 	return rt.storage.GetRun(ctx, runID)

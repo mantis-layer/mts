@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite driver（无 CGO）
@@ -144,15 +145,24 @@ func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly 
 		return nil
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)
+		`INSERT INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
 		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
 		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
-		return fmt.Errorf("agentruntime: save run: %w", err)
+		// 与 MemoryStorage.CreateRun 契约一致：重复创建必须报错，不能静默覆盖。
+		if isUniqueViolation(err) {
+			return fmt.Errorf("agentruntime: run %s 已存在", run.ID)
+		}
+		return fmt.Errorf("agentruntime: create run: %w", err)
 	}
 	return nil
+}
+
+// isUniqueViolation 判断错误是否为 SQLite UNIQUE 约束冲突。
+func isUniqueViolation(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "unique")
 }
 
 func (s *SQLiteStorage) GetRun(ctx context.Context, id string) (*TaskRun, error) {
