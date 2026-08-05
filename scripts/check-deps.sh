@@ -42,9 +42,13 @@ is_allowed() {
 }
 
 FAIL=0
+# 中断兜底清理：进程被信号终止时删除残留临时文件（健壮性）。
+TMPFILES=()
+trap 'rm -f "${TMPFILES[@]}"' EXIT
 for mod in "${!ALLOWED[@]}"; do
   tmpfile=$(mktemp)
   errfile=$(mktemp)
+  TMPFILES+=("$tmpfile" "$errfile")
   if ! go list -deps -f '{{.ImportPath}}' "$mod/..." >"$tmpfile" 2>"$errfile"; then
     echo "go list 失败: $mod: $(cat "$errfile")"
     rm -f "$tmpfile" "$errfile"
