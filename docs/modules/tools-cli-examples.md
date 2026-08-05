@@ -50,9 +50,11 @@ go run . --task "读取 data.json，用 calculator 计算 sales 总和，输出�
 
 解析顺序：`.env.local`（自动加载）→ 环境变量 → flag（flag 优先）。`SIGINT` 优雅取消。
 
-## `examples/tool_loop_agent` — S10 示例
+## `examples/` — 三个示例 Agent
 
-`examples/tool_loop_agent/`：**131 行 Go**（≤300 行），不修改 `agent-core` 源码，用 `agent-compose.Builder` + OpenAI 兼容 adapter + 官方 tools 创建并跑通 Tool Loop Agent（PRD S10 验证示例）。
+### `examples/tool_loop_agent` — Tool Loop（S10）
+
+**131 行 Go**（≤300 行），不修改 `agent-core` 源码，用 `agent-compose.Builder` + OpenAI 兼容 adapter + 官方 tools 创建并跑通 Tool Loop Agent（PRD S10 验证示例）。
 
 ```bash
 cd examples/tool_loop_agent
@@ -62,3 +64,25 @@ go run . --task "读取 ../data.json，用 calculator 计算 sales 总和并给�
 - 输入：`examples/data.json`（示例销售数据）
 - 交付检查：S8 依赖方向脚本、S10 行数与真实端点运行（file_reader → calculator → 摘要）均由 CI/手动验证
 - 受限网络需先 `export HTTPS_PROXY=...`
+
+### `examples/research_agent` — Research（M5）
+
+**184 行 Go**：`agent-runtime.ResearchPattern` 多轮研究 → 报告 Artifact + Evidence → `EvidenceCoverageEvaluator` 验收。
+
+```bash
+cd examples/research_agent
+go run . --task "读取 ../data.json，分析销售趋势并输出中文研究报告"
+```
+
+- 需要模型配置（`MTS_BASEURL`/`MTS_API_KEY`/`MTS_MODEL` 或 flag）
+
+### `examples/workflow_agent` — Workflow（M5，无需模型）
+
+**179 行 Go**：`agent-runtime.WorkflowPattern` 多步骤工作流（读取 → 人工审批 → 汇总），展示 `WAITING_HUMAN` 暂停/恢复。
+
+```bash
+cd examples/workflow_agent
+go run . --approve   # --approve 自动批准审批节点（非交互）
+```
+
+- 步骤为纯 Go 工具调用（FileReader），**无需模型 key**，可离线运行

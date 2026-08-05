@@ -13,7 +13,7 @@ agent-compose/            Manifest 与 Builder
 adapters/model-openai/    OpenAI 兼容适配器
 tools/                    内置示例工具
 cli/                      命令行入口
-examples/                 垂直切片示例
+examples/                 三个示例 Agent（Tool Loop / Research / Workflow）
 ```
 
 ## 准备环境
@@ -29,7 +29,8 @@ go work sync
 
 ```bash
 go test ./agent-model ./agent-core ./agent-runtime ./agent-plugin/... \
-  ./agent-compose ./adapters/model-openai ./tools ./cli ./examples/tool_loop_agent
+  ./agent-compose ./adapters/model-openai ./tools ./cli \
+  ./examples/tool_loop_agent ./examples/research_agent ./examples/workflow_agent
 ```
 
 ## 预览文档站
