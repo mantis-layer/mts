@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -210,9 +211,11 @@ func (c *Client) streamLoop(ctx context.Context, resp *http.Response, ch chan<- 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	// 按 index 累积流式 tool call 分片，name 组装完成后发出一次。
+	// 按 index 累积流式 tool call 分片（id/name/arguments 逐片拼接），
+	// 在流结束（finish_reason 或连接关闭）时统一发出完整 ToolCall。
+	// 不能在首个分片就发出——此时 arguments 通常尚未开始。
 	toolAcc := map[int]*agentmodel.ToolCall{}
-	emitted := map[int]bool{}
+	finished := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -251,11 +254,6 @@ func (c *Client) streamLoop(ctx context.Context, resp *http.Response, ch chan<- 
 			if tc.Function.Arguments != "" {
 				acc.Arguments += tc.Function.Arguments
 			}
-			if !emitted[tc.Index] && acc.ID != "" && acc.Name != "" {
-				emitted[tc.Index] = true
-				clone := *acc
-				ch <- agentmodel.StreamEvent{Kind: agentmodel.StreamEventToolCall, ToolCall: &clone}
-			}
 		}
 		if chunk.Usage != nil {
 			u := agentmodel.Usage{
@@ -266,11 +264,34 @@ func (c *Client) streamLoop(ctx context.Context, resp *http.Response, ch chan<- 
 			ch <- agentmodel.StreamEvent{Kind: agentmodel.StreamEventUsage, Usage: &u}
 		}
 		if choice.FinishReason != "" {
+			emitAccumulatedToolCalls(ch, toolAcc)
+			finished = true
 			ch <- agentmodel.StreamEvent{Kind: agentmodel.StreamEventFinish, FinishReason: agentmodel.FinishReason(choice.FinishReason)}
 		}
 	}
+	// 防御：流结束但未收到 finish_reason（异常截断），仍有已累积工具调用。
+	if !finished && len(toolAcc) > 0 {
+		emitAccumulatedToolCalls(ch, toolAcc)
+	}
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		ch <- agentmodel.StreamEvent{Kind: agentmodel.StreamEventError, Error: fmt.Errorf("modelopenai: 读取流失败: %w", err)}
+	}
+}
+
+// emitAccumulatedToolCalls 按 index 顺序发出全部已累积的完整 ToolCall。
+func emitAccumulatedToolCalls(ch chan<- agentmodel.StreamEvent, toolAcc map[int]*agentmodel.ToolCall) {
+	indices := make([]int, 0, len(toolAcc))
+	for idx := range toolAcc {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		acc := toolAcc[idx]
+		if acc.ID == "" || acc.Name == "" {
+			continue // 不完整（异常流）则跳过
+		}
+		clone := *acc
+		ch <- agentmodel.StreamEvent{Kind: agentmodel.StreamEventToolCall, ToolCall: &clone}
 	}
 }
 

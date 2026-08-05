@@ -119,6 +119,23 @@ func TestFileReader_UnsupportedFormat(t *testing.T) {
 	}
 }
 
+func TestFileReader_ForbiddenPath(t *testing.T) {
+	dir := t.TempDir()
+	// .env 类与密钥类文件禁止读取（NFR-004 防 prompt injection 泄露）
+	for _, name := range []string{".env.local", ".env", "server.key", "cert.pem"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f := FileReader{}
+		_, err := f.Execute(context.Background(), map[string]any{"path": path})
+		var te *agentcore.ToolError
+		if !asToolError(err, &te) || te.Code != "forbidden_path" {
+			t.Fatalf("%s: 期望 forbidden_path, 实际 %v", name, err)
+		}
+	}
+}
+
 func asToolError(err error, target **agentcore.ToolError) bool {
 	te, ok := err.(*agentcore.ToolError)
 	if ok {

@@ -23,12 +23,17 @@ func validateValue(schema map[string]any, value any, path string) error {
 		}
 	}
 	if enum, ok := schema["enum"].([]any); ok && len(enum) > 0 {
+		matched := false
 		for _, e := range enum {
 			if fmt.Sprintf("%v", e) == fmt.Sprintf("%v", value) {
-				return nil
+				matched = true
+				break
 			}
 		}
-		return fmt.Errorf("%s: 值不在 enum 允许范围内: %v", path, value)
+		if !matched {
+			return fmt.Errorf("%s: 值不在 enum 允许范围内: %v", path, value)
+		}
+		// enum 命中后继续执行下方 type 分支，保证嵌套校验不被跳过。
 	}
 	switch typ {
 	case "object":
