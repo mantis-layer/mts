@@ -1,2 +1,6 @@
 .DS_Store
 .reasonix/
+.env
+.env.*
+!.env.example
+/cli/cli

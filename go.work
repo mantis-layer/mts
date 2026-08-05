@@ -1,0 +1,9 @@
+go 1.25.4
+
+use (
+	./agent-model
+	./adapters/model-openai
+	./agent-core
+	./tools
+	./cli
+)
