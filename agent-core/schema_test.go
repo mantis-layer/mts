@@ -44,14 +44,36 @@ func TestValidateSchema_WrongType(t *testing.T) {
 
 func TestValidateSchema_Enum(t *testing.T) {
 	schema := map[string]any{
-		"type":  "string",
-		"enum":  []any{"a", "b"},
+		"type": "string",
+		"enum": []any{"a", "b"},
 	}
 	if err := ValidateJSONSchema(schema, "a"); err != nil {
 		t.Fatalf("enum 命中应通过: %v", err)
 	}
 	if err := ValidateJSONSchema(schema, "c"); err == nil {
 		t.Fatal("enum 未命中应报错")
+	}
+}
+
+func TestValidateSchema_EnumWithNestedObject(t *testing.T) {
+	// 回归：enum 命中后不得跳过嵌套 object 校验
+	schema := map[string]any{
+		"type": "object",
+		"enum": []any{},
+		"properties": map[string]any{
+			"mode": map[string]any{"type": "string", "enum": []any{"fast", "safe"}},
+		},
+		"required": []string{"mode"},
+	}
+	// enum 为空时不做 enum 约束，但嵌套校验仍须执行
+	if err := ValidateJSONSchema(schema, map[string]any{"mode": "fast"}); err != nil {
+		t.Fatalf("合法值应通过: %v", err)
+	}
+	if err := ValidateJSONSchema(schema, map[string]any{"mode": "slow"}); err == nil {
+		t.Fatal("嵌套 enum 未命中应报错")
+	}
+	if err := ValidateJSONSchema(schema, map[string]any{}); err == nil {
+		t.Fatal("缺少必填字段应报错")
 	}
 }
 

@@ -85,7 +85,8 @@ func isForbiddenPath(path string) bool {
 }
 
 // parseCSV 将首行作为表头，解析为 []map[string]string。
-func parseCSV(data []byte) ([]map[string]string, error) {	reader := csv.NewReader(strings.NewReader(string(data)))
+func parseCSV(data []byte) ([]map[string]string, error) {
+	reader := csv.NewReader(strings.NewReader(string(data)))
 	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil {

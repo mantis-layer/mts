@@ -64,10 +64,10 @@ func (c *Client) endpoint() string {
 }
 
 type chatRequest struct {
-	Model    string                 `json:"model"`
-	Messages []agentmodel.Message   `json:"messages"`
+	Model    string                  `json:"model"`
+	Messages []agentmodel.Message    `json:"messages"`
 	Tools    []agentmodel.ToolSchema `json:"tools,omitempty"`
-	Stream   bool                   `json:"stream"`
+	Stream   bool                    `json:"stream"`
 }
 
 // Complete 执行一次非流式补全。
