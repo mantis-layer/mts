@@ -2,24 +2,60 @@
 
 ## Agent 与 Tool Loop
 
-`agent-core.Agent` 运行 Model → Tool → Model 循环。模型以流式事件生成文本或 Tool Call；每个 Tool Call 会先经过 JSON Schema 校验，再在带超时的上下文中执行。没有 Tool Call 时，模型消息即为最终结果。
+`agent-core.Agent` 运行 **Model → Tool → Model** 循环：
+
+1. 模型以流式事件（`StreamEvent`）生成文本增量（`delta`）或工具调用（`tool_call`）。
+2. 每个 `tool_call` 的 `arguments` 先经 **JSON Schema 校验**（`ValidateJSONSchema`，支持 `type`/`required`/`properties`/`items`/`enum`/数值边界子集）；非法参数产生结构化 `ToolError` 并回写上下文，由模型自行决策。
+3. 工具在**带超时的上下文**（`Options.ToolTimeout`）中执行；取消（context cancel）会向下传播到模型与工具。
+4. 没有 Tool Call 时，模型消息即为最终结果（`Result.FinalMessage`）。
+
+Agent 事件通过 `Options.OnEvent` 可观察（`model.start`/`model.delta`/`model.done`/`tool.start`/`tool.done`/`tool.error`/`agent.message`/…）。
 
 ## Task 与 TaskRun
 
-`Task` 是用户提交的任务定义；`TaskRun` 是一次具体运行。`agent-runtime` 将运行状态、输入、进度、Usage、结果和错误持久化到 `Storage`，使同一任务可查询、取消或在人工输入后继续。
+`Task` 是用户提交的任务定义（`ID`/`Name`/`Pattern`/`Input`）；`TaskRun` 是一次具体运行，生命周期状态机：
+
+```text
+created → running → completed
+                  → failed
+                  → cancelled
+running → waiting（HITL：等待人工输入）→ running
+```
+
+`agent-runtime` 将运行状态、输入、进度（`Progress`）、Usage、结果与错误持久化到 `Storage`；每次 `Pattern.Execute` 后写入一个 **Checkpoint**（run 状态 + 事件流），因此 TaskRun 可查询、取消、在人工输入后继续，甚至跨进程重启恢复（`SQLiteStorage` 重建后从同一 `Progress` 继续）。
 
 ## Pattern
 
-Pattern 只决定某次运行的下一步，Runtime 负责持久化、预算和状态迁移。仓库现有的 Pattern 包括：
+**Pattern 只决定某次运行的下一步**（`StepResult`），Runtime 负责持久化、预算、状态迁移与事件审计（FR-005）。`StepResult` 携带：
 
-- `tool_loop`：用 `agent-core` 完成一次工具循环。
-- `research`：把研究过程拆为计划、收集、报告三个可保存的阶段。
-- `workflow`：按确定性步骤推进，并可在需要人工审批时进入等待状态。
+- `Done` / `NeedHuman`（进入 `waiting` 等待人工输入）/ `Terminated`（业务终止，如审批拒绝 → `failed`）
+- `Progress`（Pattern 自定义进度，持久化支持幂等恢复）
+- `Artifacts` / `Evidence`（本步骤产出，Runtime 原子落库）
+- `Iterations` / `ToolCalls` / `Usage`（预算与成本）
+
+内置 Pattern：
+
+| Pattern | 行为 |
+|---|---|
+| `tool_loop` | 用 `agent-core` 完成一次工具循环（`ToolLoopPattern`） |
+| `research` | 运行一次 Agent 研究，把输出作为报告 Artifact + Evidence（`ResearchPattern`） |
+| `workflow` | 确定性步骤推进，支持 Rule Evaluator（跳过）与人工审批节点（`WorkflowPattern`） |
+
+三个 Pattern 共享同一 Runtime Core——注册后以 `Task.Pattern` 选择（S5）。
 
 ## Artifact、Evidence 与 Evaluator
 
-Pattern 可以产生结构化 `Artifact`，并为 Artifact 关联来源 `Evidence`。任务完成前，Runtime 会依次运行已注册的 Evaluator；任一 Evaluator 不通过，Run 会以 `failed` 结束。
+- `Artifact` 是结构化产出（`text`/`json`/`table`），`Pattern` 通过 `StepResult.Artifacts` 产出，Runtime 原子落库（`AddArtifactsEvidence` 单事务，失败不留孤立数据）。
+- `Evidence` 把 Artifact 关联到来源（`Source`/`Quote`），供引用与验收。
+- `Evaluator` 在任务完成路径前依次运行；任一不通过 → Run 以 `failed` 结束（并记录 `EventEvaluatorResult`）。内置 `SchemaEvaluator`（JSON 合法）与 `EvidenceCoverageEvaluator`（证据条数/覆盖率）。
 
 ## Plugin 与 Manifest
 
-Plugin 用于把模型 Provider、工具、Evaluator 或 Pattern 加入 Registry。`agent-compose` 则通过 YAML/JSON Manifest 或 Go Builder，把模型和工具组合成可运行的 Agent。
+- `agent-plugin` 把模型 Provider、工具、Evaluator 或 Pattern 包装为 `Plugin` 注册到 `Registry`（版本校验、生命周期）；`mcp` 子包提供 MCP（stdio）工具适配。
+- `agent-compose` 通过 YAML/JSON `Manifest` 或 Go `Builder` 组合模型与工具；密钥只允许 `${ENV}` 引用（`ResolveAPIKey`，明文报 `plaintext_api_key`）。
+
+## 预算、取消与人工介入
+
+- `Budget{MaxIterations, MaxToolCalls}`：超限 → `failed` + `EventBudgetExceeded`。
+- 取消：context cancel（执行中）或 `Runtime.Cancel` API（触发执行中 Run 的取消函数 + CAS 迁移终态）。
+- 人工介入：`waiting` 状态 + `SubmitHumanInput`，审批拒绝经 `Terminated` 以 `failed` 终止，不进 Evaluator。
