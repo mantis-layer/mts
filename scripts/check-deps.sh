@@ -24,6 +24,7 @@ declare -A ALLOWED=(
   ["$PREFIX/agent-core"]="$PREFIX/agent-model"
   ["$PREFIX/agent-plugin"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/agent-compose"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin"
+  ["$PREFIX/agent-runtime"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/adapters/model-openai"]="$PREFIX/agent-model"
   ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
