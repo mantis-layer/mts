@@ -125,6 +125,7 @@ func (rt *Runtime) SubmitTask(ctx context.Context, task *Task) (*TaskRun, error)
 		TaskID:    task.ID,
 		Pattern:   task.Pattern,
 		State:     RunStateCreated,
+		TaskInput: task.Input,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -221,6 +222,34 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		run.ToolCalls += step.ToolCalls
 		mergeUsage(&run.Usage, step.Usage)
 		run.UpdatedAt = time.Now()
+		if step.Progress != "" {
+			run.Progress = step.Progress
+		}
+		// 落库本步骤产出的 Artifact 与 Evidence（name→id 映射）
+		nameToID := map[string]string{}
+		for i := range step.Artifacts {
+			a := &step.Artifacts[i]
+			a.ID = newID("art")
+			a.TaskRunID = run.ID
+			if a.CreatedAt.IsZero() {
+				a.CreatedAt = time.Now()
+			}
+			nameToID[a.Name] = a.ID
+			if err := rt.storage.AddArtifact(ctx, a); err != nil {
+				_ = rt.fail(ctx, run, err)
+				return rt.storage.GetRun(ctx, runID)
+			}
+			_ = rt.addEvent(ctx, run, EventArtifactCreated, map[string]any{"name": a.Name})
+		}
+		for _, ev := range step.Evidence {
+			if id, ok := nameToID[ev.ArtifactID]; ok {
+				ev.ArtifactID = id
+			}
+			if err := rt.storage.AddEvidence(ctx, &ev); err != nil {
+				_ = rt.fail(ctx, run, err)
+				return rt.storage.GetRun(ctx, runID)
+			}
+		}
 
 		if step.NeedHuman {
 			if cur, err := rt.transitionOrReturn(ctx, run, RunStateWaiting); cur != nil {

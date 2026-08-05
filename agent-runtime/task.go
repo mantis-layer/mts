@@ -68,6 +68,8 @@ type TaskRun struct {
 	ToolCalls  int
 	Usage      agentmodel.Usage
 	Summary    string // 运行期逐步追加的输出
+	Progress   string // Pattern 自定义进度（持久化，支持幂等恢复）
+	TaskInput  string // 任务输入（SubmitTask 时从 Task 复制；Pattern 步骤输入）
 	Input      string // HITL：最近一次人工输入
 	Result     *TaskResult
 	Error      string

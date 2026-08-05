@@ -63,7 +63,7 @@ func (s *SQLiteStorage) initSchema() error {
 			id TEXT PRIMARY KEY, name TEXT, pattern TEXT, input TEXT, created_at TEXT)`,
 		`CREATE TABLE IF NOT EXISTS runs (
 			id TEXT PRIMARY KEY, task_id TEXT, pattern TEXT, state TEXT, iterations INTEGER,
-			tool_calls INTEGER, usage_json TEXT, summary TEXT, input TEXT, result_json TEXT,
+			tool_calls INTEGER, usage_json TEXT, summary TEXT, progress TEXT, task_input TEXT, input TEXT, result_json TEXT,
 			error TEXT, created_at TEXT, updated_at TEXT)`,
 		`CREATE TABLE IF NOT EXISTS events (
 			id TEXT PRIMARY KEY, run_id TEXT, kind TEXT, data_json TEXT, timestamp TEXT)`,
@@ -79,6 +79,9 @@ func (s *SQLiteStorage) initSchema() error {
 			return fmt.Errorf("agentruntime: sqlite schema: %w", err)
 		}
 	}
+	// 旧库迁移：runs 表新增 progress/task_input 列（幂等；重复列错误忽略）。
+	_, _ = s.db.Exec(`ALTER TABLE runs ADD COLUMN progress TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE runs ADD COLUMN task_input TEXT`)
 	return nil
 }
 
@@ -129,10 +132,10 @@ func (s *SQLiteStorage) UpdateRunIf(ctx context.Context, run *TaskRun, from RunS
 		}
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
+		`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, progress=?, task_input=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
 		 WHERE id=? AND state=?`,
 		run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
-		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+		string(usageJSON), run.Summary, run.Progress, run.TaskInput, run.Input, nullable(resultJSON), run.Error,
 		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano), run.ID, string(from))
 	if err != nil {
 		return false, fmt.Errorf("agentruntime: update run if: %w", err)
@@ -181,10 +184,10 @@ func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly 
 		// 与 MemoryStorage 契约一致：UpdateRun 对不存在的 run 必须报 NotFoundError，
 		// 不能静默建行（否则丢失更新会被掩盖）。
 		res, err := s.db.ExecContext(ctx,
-			`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
+			`UPDATE runs SET task_id=?, pattern=?, state=?, iterations=?, tool_calls=?, usage_json=?, summary=?, progress=?, task_input=?, input=?, result_json=?, error=?, created_at=?, updated_at=?
 			 WHERE id = ?`,
 			run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
-			string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+			string(usageJSON), run.Summary, run.Progress, run.TaskInput, run.Input, nullable(resultJSON), run.Error,
 			run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano), run.ID)
 		if err != nil {
 			return fmt.Errorf("agentruntime: update run: %w", err)
@@ -195,10 +198,10 @@ func (s *SQLiteStorage) insertRun(ctx context.Context, run *TaskRun, updateOnly 
 		return nil
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runs (id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, progress, task_input, input, result_json, error, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.TaskID, run.Pattern, string(run.State), run.Iterations, run.ToolCalls,
-		string(usageJSON), run.Summary, run.Input, nullable(resultJSON), run.Error,
+		string(usageJSON), run.Summary, run.Progress, run.TaskInput, run.Input, nullable(resultJSON), run.Error,
 		run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		// 与 MemoryStorage.CreateRun 契约一致：重复创建必须报错，不能静默覆盖。
@@ -217,11 +220,11 @@ func isUniqueViolation(err error) bool {
 
 func (s *SQLiteStorage) GetRun(ctx context.Context, id string) (*TaskRun, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, input, result_json, error, created_at, updated_at FROM runs WHERE id = ?`, id)
+		`SELECT id, task_id, pattern, state, iterations, tool_calls, usage_json, summary, progress, task_input, input, result_json, error, created_at, updated_at FROM runs WHERE id = ?`, id)
 	var r TaskRun
 	var usageJSON, resultJSON, createdAt, updatedAt sql.NullString
 	if err := row.Scan(&r.ID, &r.TaskID, &r.Pattern, (*string)(&r.State), &r.Iterations, &r.ToolCalls,
-		&usageJSON, &r.Summary, &r.Input, &resultJSON, &r.Error, &createdAt, &updatedAt); err != nil {
+		&usageJSON, &r.Summary, &r.Progress, &r.TaskInput, &r.Input, &resultJSON, &r.Error, &createdAt, &updatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &NotFoundError{Kind: "run", ID: id}
 		}
