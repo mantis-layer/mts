@@ -192,6 +192,32 @@ func TestRegistry_TypeMismatch(t *testing.T) {
 	if err := r.Register(context.Background(), &fakeModelPlugin{manifest: validManifest("mismatch", PluginTypeTool), model: &fakeModel{name: "m"}}); err == nil {
 		t.Fatal("类型不匹配应报错")
 	}
+	// 失败后不得残留（blocking bug 回归）
+	if _, ok := r.GetPlugin("mismatch"); ok {
+		t.Fatal("类型不匹配后插件不应残留")
+	}
+	if len(r.Plugins()) != 0 || len(r.Tools()) != 0 || len(r.Models()) != 0 {
+		t.Fatal("类型不匹配后注册表不应有任何残留")
+	}
+}
+
+func TestRegistry_ToolConflictNoResidue(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(context.Background(), &fakeToolPlugin{manifest: validManifest("first", PluginTypeTool), tools: []agentcore.Tool{&simpleTool{name: "shared"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// 第二个插件提供同名工具 → 提交阶段查重失败，不应残留
+	err := r.Register(context.Background(), &fakeToolPlugin{manifest: validManifest("second", PluginTypeTool), tools: []agentcore.Tool{&simpleTool{name: "shared"}}})
+	var me *ManifestError
+	if !errors.As(err, &me) || me.Code != "duplicate_tool" {
+		t.Fatalf("期望 duplicate_tool, 实际 %v", err)
+	}
+	if _, ok := r.GetPlugin("second"); ok {
+		t.Fatal("冲突插件不应残留")
+	}
+	if len(r.Tools()) != 1 {
+		t.Fatalf("工具数=%d 期望 1（仅 first）", len(r.Tools()))
+	}
 }
 
 func TestRegistry_CloseAll(t *testing.T) {

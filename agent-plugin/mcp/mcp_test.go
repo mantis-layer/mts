@@ -2,9 +2,12 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +91,70 @@ func TestMcpToolAdapter_ImplementsCoreTool(t *testing.T) {
 	// 缺必填字段时 Schema 校验应拒绝
 	if err := agentcore.ValidateJSONSchema(adapter.Parameters(), map[string]any{}); err == nil {
 		t.Fatal("缺必填 text 应报错")
+	}
+}
+
+// TestMCPClient_RPCError 验证 server 返回 JSON-RPC error 时被传播为 Go error。
+func TestMCPClient_RPCError(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("无 go 工具链")
+	}
+	bin := buildTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	client, err := NewClient(ctx, bin)
+	if err != nil {
+		t.Fatalf("NewClient 失败: %v", err)
+	}
+	defer client.Close()
+
+	_, _, err = client.CallTool(ctx, "echo", map[string]any{"text": "boom"})
+	if err == nil {
+		t.Fatal("RPC error 应被传播")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("错误信息=%v", err)
+	}
+}
+
+// TestMCPClient_Concurrent 验证并发 CallTool 无数据竞争（配合 -race）。
+func TestMCPClient_Concurrent(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("无 go 工具链")
+	}
+	bin := buildTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	client, err := NewClient(ctx, bin)
+	if err != nil {
+		t.Fatalf("NewClient 失败: %v", err)
+	}
+	defer client.Close()
+
+	const n = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			text := fmt.Sprintf("msg-%d", i)
+			got, _, err := client.CallTool(ctx, "echo", map[string]any{"text": text})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if got != "echo: "+text {
+				errs <- fmt.Errorf("响应错配: got=%q want=%q", got, "echo: "+text)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("并发错误: %v", err)
 	}
 }
 

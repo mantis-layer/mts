@@ -29,6 +29,9 @@ func NewRegistry() *Registry {
 }
 
 // Register 校验 Manifest 并注册插件；任一环节失败返回错误且不残留状态。
+//
+// 顺序：锁外完成类型断言 / Init / 扩展提取（可重入），
+// 锁内仅做查重与写入（快速路径）；提交阶段失败时回滚已写入内容。
 func (r *Registry) Register(ctx context.Context, p Plugin) error {
 	if p == nil {
 		return fmt.Errorf("agentplugin: 不能注册 nil 插件")
@@ -38,53 +41,69 @@ func (r *Registry) Register(ctx context.Context, p Plugin) error {
 		return err
 	}
 
-	r.mu.Lock()
-	if _, exists := r.plugins[m.Name]; exists {
-		r.mu.Unlock()
-		return &ManifestError{Code: "duplicate_name", Message: fmt.Sprintf("插件 %q 已注册", m.Name), Manifest: m}
-	}
-	// 失败路径由 defer 释放锁；成功路径显式 Unlock。
-	ok := false
-	defer func() {
-		if !ok {
-			r.mu.Unlock()
-		}
-	}()
-
-	if err := p.Init(ctx); err != nil {
-		return fmt.Errorf("agentplugin: 插件 %q Init 失败: %w", m.Name, err)
-	}
-	r.plugins[m.Name] = p
-
+	// —— 锁外预检与扩展提取 ——
+	var tools []agentcore.Tool
+	var model agentmodel.Model
 	switch m.Type {
 	case PluginTypeTool:
 		tp, ok := p.(ToolPlugin)
 		if !ok {
 			return fmt.Errorf("agentplugin: 插件 %q 声明 type=tool 但未实现 ToolPlugin", m.Name)
 		}
-		for _, t := range tp.Tools() {
-			if t == nil {
-				continue
-			}
-			if _, dup := r.tools[t.Name()]; dup {
-				return fmt.Errorf("agentplugin: 插件 %q 注册了重复工具 %q", m.Name, t.Name())
-			}
-			r.tools[t.Name()] = t
-		}
+		tools = tp.Tools()
 	case PluginTypeModelProvider:
 		mp, ok := p.(ModelProviderPlugin)
 		if !ok {
 			return fmt.Errorf("agentplugin: 插件 %q 声明 type=model_provider 但未实现 ModelProviderPlugin", m.Name)
 		}
-		model, err := mp.Model()
+		var err error
+		model, err = mp.Model()
 		if err != nil {
 			return fmt.Errorf("agentplugin: 插件 %q Model() 失败: %w", m.Name, err)
 		}
-		r.models[m.Name] = model
+	}
+	if err := p.Init(ctx); err != nil {
+		return fmt.Errorf("agentplugin: 插件 %q Init 失败: %w", m.Name, err)
+	}
+	// Init 成功后若提交阶段失败，回滚时 Close 释放插件资源。
+	initDone := true
+	defer func() {
+		if initDone {
+			_ = p.Close()
+		}
+	}()
+
+	// —— 锁内查重与提交（失败回滚） ——
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, dup := r.plugins[m.Name]; dup {
+		return &ManifestError{Code: "duplicate_name", Message: fmt.Sprintf("插件 %q 已注册", m.Name), Manifest: m}
+	}
+	for _, t := range tools {
+		if t == nil {
+			continue
+		}
+		if _, dup := r.tools[t.Name()]; dup {
+			return &ManifestError{Code: "duplicate_tool", Message: fmt.Sprintf("插件 %q 注册了重复工具 %q", m.Name, t.Name()), Manifest: m}
+		}
+	}
+	if model != nil {
+		if _, dup := r.models[m.Name]; dup {
+			return &ManifestError{Code: "duplicate_provider", Message: fmt.Sprintf("模型 Provider %q 已注册", m.Name), Manifest: m}
+		}
 	}
 
-	ok = true
-	r.mu.Unlock()
+	// 提交：全部查重通过后才写入
+	r.plugins[m.Name] = p
+	for _, t := range tools {
+		if t != nil {
+			r.tools[t.Name()] = t
+		}
+	}
+	if model != nil {
+		r.models[m.Name] = model
+	}
+	initDone = false // 提交成功，不再 Close
 	return nil
 }
 

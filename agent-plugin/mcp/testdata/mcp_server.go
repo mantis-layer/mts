@@ -74,6 +74,13 @@ func main() {
 			}
 			_ = json.Unmarshal(req.Params, &params)
 			text, _ := params.Arguments["text"].(string)
+			if text == "boom" {
+				resp.Error = &struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				}{Code: -32000, Message: "internal error: boom"}
+				break
+			}
 			resp.Result = map[string]any{
 				"content": []map[string]any{
 					{"type": "text", "text": "echo: " + text},

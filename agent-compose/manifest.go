@@ -103,6 +103,10 @@ func (s ModelSpec) ResolveAPIKey() string {
 	return v
 }
 
+// ModelFactory 根据 ModelSpec 构造模型实现（用于 provider=openai-compatible，
+// 由调用方注入对应 adapter，避免 agent-compose 反向依赖具体 adapter）。
+type ModelFactory func(spec ModelSpec) (agentmodel.Model, error)
+
 // Composed 是一次组装的结果。
 type Composed struct {
 	Agent   *agentcore.Agent
@@ -111,13 +115,13 @@ type Composed struct {
 }
 
 // Compose 按 Manifest 组装 Agent（B5）：
-// 校验 manifest → 从插件 registry 解析 model 与 tools → 构造 agent-core Agent。
-func Compose(ctx context.Context, m *AgentManifest, plugins *agentplugin.Registry, openAIModel agentmodel.Model) (*Composed, error) {
+// 校验 manifest → 从插件 registry 或 model factory 解析 model → 解析 tools → 构造 agent-core Agent。
+func Compose(ctx context.Context, m *AgentManifest, plugins *agentplugin.Registry, modelFactory ModelFactory) (*Composed, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
 
-	// 解析模型：优先 provider 插件；其次内联 OpenAI 兼容配置。
+	// 解析模型：优先 provider 插件；openai-compatible 走调用方注入的 factory。
 	var model agentmodel.Model
 	if m.Model.Provider != "openai-compatible" {
 		var ok bool
@@ -126,10 +130,17 @@ func Compose(ctx context.Context, m *AgentManifest, plugins *agentplugin.Registr
 			return nil, &ManifestError{Code: "unknown_provider", Message: fmt.Sprintf("模型 provider %q 未注册", m.Model.Provider)}
 		}
 	} else {
-		if openAIModel == nil {
-			return nil, &ManifestError{Code: "missing_openai_model", Message: "provider=openai-compatible 需要提供 openai 模型实现"}
+		if modelFactory == nil {
+			return nil, &ManifestError{Code: "missing_openai_model", Message: "provider=openai-compatible 需要提供 ModelFactory"}
 		}
-		model = openAIModel
+		var err error
+		model, err = modelFactory(m.Model)
+		if err != nil {
+			return nil, &ManifestError{Code: "model_factory_error", Message: fmt.Sprintf("构造模型失败: %v", err)}
+		}
+		if model == nil {
+			return nil, &ManifestError{Code: "model_factory_error", Message: "ModelFactory 返回 nil 模型"}
+		}
 	}
 
 	// 解析工具：所有引用的工具必须已在插件中注册（B5）。
@@ -160,7 +171,6 @@ func Compose(ctx context.Context, m *AgentManifest, plugins *agentplugin.Registr
 
 // toolLookup 缓存插件内工具名到工具的映射。
 type toolLookup struct {
-	p    agentplugin.Plugin
 	byID map[string]agentcore.Tool
 }
 
@@ -176,7 +186,7 @@ func collectToolPlugins(plugins *agentplugin.Registry) ([]*toolLookup, error) {
 		if !ok {
 			continue
 		}
-		l := &toolLookup{p: p, byID: make(map[string]agentcore.Tool)}
+		l := &toolLookup{byID: make(map[string]agentcore.Tool)}
 		for _, t := range tp.Tools() {
 			if _, dup := l.byID[t.Name()]; dup {
 				return nil, fmt.Errorf("agentcompose: 插件 %q 提供重复工具 %q", p.Manifest().Name, t.Name())

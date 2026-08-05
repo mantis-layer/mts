@@ -207,7 +207,13 @@ func TestCompose_UnknownProvider(t *testing.T) {
 func TestCompose_OpenAICompatible(t *testing.T) {
 	reg := newPlugins(t)
 	m := &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "openai-compatible", BaseURL: "https://x", APIKey: "${MTS_API_KEY}", Model: "gpt-5.4"}, Tools: []string{"t1"}}
-	comp, err := Compose(context.Background(), m, reg, &fakeModel{name: "openai"})
+	factory := func(spec ModelSpec) (agentmodel.Model, error) {
+		if spec.BaseURL != "https://x" || spec.Model != "gpt-5.4" {
+			t.Fatalf("factory 收到错误 spec: %+v", spec)
+		}
+		return &fakeModel{name: "openai"}, nil
+	}
+	comp, err := Compose(context.Background(), m, reg, factory)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -216,6 +222,16 @@ func TestCompose_OpenAICompatible(t *testing.T) {
 	}
 	if m.Model.ResolveAPIKey() != os.Getenv("MTS_API_KEY") {
 		t.Fatalf("env 引用解析失败: %q", m.Model.ResolveAPIKey())
+	}
+}
+
+func TestCompose_OpenAICompatibleMissingFactory(t *testing.T) {
+	reg := newPlugins(t)
+	m := &AgentManifest{APIVersion: "v1", Name: "a", Model: ModelSpec{Provider: "openai-compatible", Model: "m"}}
+	_, err := Compose(context.Background(), m, reg, nil)
+	var me *ManifestError
+	if !asManifestErr(err, &me) || me.Code != "missing_openai_model" {
+		t.Fatalf("期望 missing_openai_model, 实际 %v", err)
 	}
 }
 

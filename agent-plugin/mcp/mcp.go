@@ -29,11 +29,18 @@ type Client struct {
 
 	mu      sync.Mutex
 	nextID  int
-	pending map[int]chan json.RawMessage
+	pending map[int]chan rpcResult
 	done    chan struct{}
+	closed  bool
 
 	// 工具缓存（initialize 时从 tools/list 拉取）
 	tools []ToolInfo
+}
+
+// rpcResult 是一次 JSON-RPC 调用的结果（成功 raw 或 error）。
+type rpcResult struct {
+	raw json.RawMessage
+	err error
 }
 
 // ToolInfo 描述 MCP server 暴露的一个工具。
@@ -73,7 +80,7 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 	if err != nil {
 		return nil, fmt.Errorf("mcp: stdout 管道: %w", err)
 	}
-	cmd.Stderr = nil // 保持静默；如需调试可接管
+	cmd.Stderr = io.Discard // 丢弃 server 日志；如需排障可接管
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("mcp: 启动 server %q: %w", command, err)
@@ -83,7 +90,7 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 		cmd:     cmd,
 		stdin:   stdin,
 		scanner: bufio.NewScanner(stdout),
-		pending: make(map[int]chan json.RawMessage),
+		pending: make(map[int]chan rpcResult),
 		done:    make(chan struct{}),
 	}
 	go c.readLoop()
@@ -148,10 +155,10 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 }
 
 func (c *Client) call(ctx context.Context, method string, params any, result any) error {
-	id := c.nextID + 1
-	c.nextID = id
-	respCh := make(chan json.RawMessage, 1)
+	respCh := make(chan rpcResult, 1)
 	c.mu.Lock()
+	c.nextID++
+	id := c.nextID
 	c.pending[id] = respCh
 	c.mu.Unlock()
 	defer func() {
@@ -177,11 +184,14 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		return fmt.Errorf("mcp: %s 等待响应超时: %w", method, ctx.Err())
 	case <-c.done:
 		return fmt.Errorf("mcp: server 已退出，未收到 %s 响应", method)
-	case raw, ok := <-respCh:
+	case res, ok := <-respCh:
 		if !ok {
 			return fmt.Errorf("mcp: server 已退出，未收到 %s 响应", method)
 		}
-		return json.Unmarshal(raw, result)
+		if res.err != nil {
+			return res.err
+		}
+		return json.Unmarshal(res.raw, result)
 	}
 }
 
@@ -219,27 +229,29 @@ func (c *Client) readLoop() {
 			continue
 		}
 		if resp.Error != nil {
-			ch <- mustMarshal(map[string]any{"error": resp.Error.Message})
+			ch <- rpcResult{err: fmt.Errorf("mcp: %s", resp.Error.Message)}
 			continue
 		}
-		ch <- resp.Result
+		ch <- rpcResult{raw: resp.Result}
 	}
 	// server 退出：唤醒所有 pending
 	c.mu.Lock()
 	for _, ch := range c.pending {
 		close(ch)
 	}
-	c.pending = map[int]chan json.RawMessage{}
+	c.pending = map[int]chan rpcResult{}
 	c.mu.Unlock()
 }
 
-func mustMarshal(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
-}
-
-// Close 关闭 stdin 并等待子进程退出。
+// Close 关闭 stdin 并等待子进程退出；幂等，可安全多次调用。
 func (c *Client) Close() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	c.mu.Unlock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
 	}
