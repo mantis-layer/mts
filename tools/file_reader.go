@@ -41,6 +41,9 @@ func (FileReader) Execute(ctx context.Context, input map[string]any) (map[string
 	if path == "" {
 		return nil, agentcore.NewToolError("invalid_argument", "path 必填")
 	}
+	if isForbiddenPath(path) {
+		return nil, agentcore.NewToolError("forbidden_path", "禁止读取密钥或环境配置文件: "+path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -67,9 +70,22 @@ func (FileReader) Execute(ctx context.Context, input map[string]any) (map[string
 	}
 }
 
+// isForbiddenPath 判断路径是否指向密钥/环境配置文件，防止经
+// prompt injection 读取 .env.local 等敏感文件（NFR-004）。
+func isForbiddenPath(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".env") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".pem", ".key", ".p12", ".pfx":
+		return true
+	}
+	return false
+}
+
 // parseCSV 将首行作为表头，解析为 []map[string]string。
-func parseCSV(data []byte) ([]map[string]string, error) {
-	reader := csv.NewReader(strings.NewReader(string(data)))
+func parseCSV(data []byte) ([]map[string]string, error) {	reader := csv.NewReader(strings.NewReader(string(data)))
 	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil {
