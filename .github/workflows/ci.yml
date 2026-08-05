@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: |
+            **/go.sum
+
+      - name: Build
+        run: go build all
+
+      - name: Vet
+        run: go vet ./agent-model/... ./adapters/model-openai/... ./agent-core/... ./agent-plugin/... ./agent-compose/... ./tools/... ./cli/... ./examples/tool_loop_agent/...
+
+      - name: Test
+        run: go test ./agent-model/... ./adapters/model-openai/... ./agent-core/... ./agent-plugin/... ./agent-compose/... ./tools/... ./cli/... ./examples/tool_loop_agent/...
+
+      - name: Dependency direction check (PRD S8)
+        run: scripts/check-deps.sh
+
+      - name: Gofmt
+        run: test -z "$(gofmt -l . | grep -v '^\.git/')"

@@ -1,5 +1,6 @@
 .DS_Store
 .reasonix/
+reasonix.toml
 .env
 .env.*
 !.env.example
