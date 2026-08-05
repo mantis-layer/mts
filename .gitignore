@@ -6,5 +6,6 @@ reasonix.toml
 !.env.example
 /node_modules
 /cli/cli
+examples/*/*_agent
 /docs/.vitepress/cache
 /docs/.vitepress/dist

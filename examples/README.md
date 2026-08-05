@@ -8,9 +8,9 @@
 - `data.json` — 示例销售数据
 - `tool_loop_agent/` — **Tool Loop 示例**（131 行）：`agent-compose` Builder + OpenAI
   兼容 adapter + 官方 tools 创建并跑通 Tool Loop Agent（PRD S10 验证）。
-- `research_agent/` — **Research 示例**（173 行）：`agent-runtime` ResearchPattern 多轮
+- `research_agent/` — **Research 示例**（184 行）：`agent-runtime` ResearchPattern 多轮
   研究 → 报告 Artifact + Evidence → `EvidenceCoverageEvaluator` 验收。
-- `workflow_agent/` — **Workflow 示例**（170 行）：`agent-runtime` WorkflowPattern 多步骤
+- `workflow_agent/` — **Workflow 示例**（179 行）：`agent-runtime` WorkflowPattern 多步骤
   工作流（读取 → 人工审批 → 汇总），展示 WAITING_HUMAN 暂停与恢复。
 - `mcp/python_echo_server.py` — MCP 跨语言联调用零依赖 Python MCP stdio server。
 - `README.md` — 本文档
