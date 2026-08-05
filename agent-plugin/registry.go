@@ -66,9 +66,9 @@ func (r *Registry) Register(ctx context.Context, p Plugin) error {
 		return fmt.Errorf("agentplugin: 插件 %q Init 失败: %w", m.Name, err)
 	}
 	// Init 成功后若提交阶段失败，回滚时 Close 释放插件资源。
-	initDone := true
+	needsRollback := true
 	defer func() {
-		if initDone {
+		if needsRollback {
 			_ = p.Close()
 		}
 	}()
@@ -103,7 +103,7 @@ func (r *Registry) Register(ctx context.Context, p Plugin) error {
 	if model != nil {
 		r.models[m.Name] = model
 	}
-	initDone = false // 提交成功，不再 Close
+	needsRollback = false // 提交成功，不再 Close
 	return nil
 }
 
