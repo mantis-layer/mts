@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -392,15 +393,20 @@ func (rt *Runtime) transition(ctx context.Context, run *TaskRun, to RunState) er
 	return nil
 }
 
-// transitionOrReturn 执行状态迁移；若迁移失败（含并发 CAS 冲突），
-// 返回 storage 中的最新状态并透传原始错误（调用方据此返回）。
+// transitionOrReturn 执行状态迁移。
+// CAS 冲突（并发修改，如外部取消）→ 返回 storage 最新状态且不视为错误；
+// 其它错误（storage 失败、非法转移）→ 透传。
 func (rt *Runtime) transitionOrReturn(ctx context.Context, run *TaskRun, to RunState) (*TaskRun, error) {
 	if err := rt.transition(ctx, run, to); err != nil {
-		cur, gerr := rt.storage.GetRun(context.WithoutCancel(ctx), run.ID)
-		if gerr != nil {
-			return nil, err
+		var se *StateError
+		if errors.As(err, &se) {
+			cur, gerr := rt.storage.GetRun(context.WithoutCancel(ctx), run.ID)
+			if gerr != nil {
+				return nil, err
+			}
+			return cur, nil
 		}
-		return cur, err
+		return nil, err
 	}
 	return nil, nil
 }
