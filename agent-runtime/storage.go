@@ -86,7 +86,7 @@ func (s *MemoryStorage) CreateRun(_ context.Context, run *TaskRun) error {
 	if _, ok := s.runs[run.ID]; ok {
 		return &StateError{Op: "create run", From: RunState(run.State), To: ""}
 	}
-	s.runs[run.ID] = run.Clone()
+	s.runs[run.ID] = cloneRun(run)
 	return nil
 }
 
@@ -96,7 +96,7 @@ func (s *MemoryStorage) UpdateRun(_ context.Context, run *TaskRun) error {
 	if _, ok := s.runs[run.ID]; !ok {
 		return &NotFoundError{Kind: "run", ID: run.ID}
 	}
-	s.runs[run.ID] = run.Clone()
+	s.runs[run.ID] = cloneRun(run)
 	return nil
 }
 
@@ -111,7 +111,7 @@ func (s *MemoryStorage) UpdateRunIf(_ context.Context, run *TaskRun, from RunSta
 	if cur.State != from {
 		return false, nil
 	}
-	s.runs[run.ID] = run.Clone()
+	s.runs[run.ID] = cloneRun(run)
 	return true, nil
 }
 
@@ -122,7 +122,7 @@ func (s *MemoryStorage) GetRun(_ context.Context, id string) (*TaskRun, error) {
 	if !ok {
 		return nil, &NotFoundError{Kind: "run", ID: id}
 	}
-	return r.Clone(), nil
+	return cloneRun(r), nil
 }
 
 func (s *MemoryStorage) AddEvent(_ context.Context, ev *RuntimeEvent) error {

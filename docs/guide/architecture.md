@@ -12,15 +12,18 @@ agent-compose      agent-runtime
 agent-plugin ───→ agent-core
         ↓                 ↓
   adapter / MCP       agent-model
+                  ↗
+         agent-contract
 ```
 
 规则（`scripts/check-deps.sh` 严格执行）：
 
 - `agent-model` **不依赖任何内部 Module**（Provider 无关的纯契约）。
+- `agent-contract` 仅依赖 `agent-model`（统一 Usage 等基础类型）。
 - `agent-core` 仅依赖 `agent-model`。
 - `agent-plugin` 依赖 `agent-model`、`agent-core`。
 - `agent-compose` 依赖 `agent-model`、`agent-core`、`agent-plugin`。
-- `agent-runtime` 依赖 `agent-model`、`agent-core`。
+- `agent-runtime` 依赖 `agent-model`、`agent-core`、`agent-contract`。
 - `adapters/model-openai` 仅依赖 `agent-model`。
 - `tools` 依赖 `agent-model`、`agent-core`。
 - **任何 Module 不得依赖 `agent-runtime`**（Runtime 是上层；v0.1 的 `cli`/`examples` 尚不依赖它，后续版本引入）。
@@ -31,6 +34,7 @@ agent-plugin ───→ agent-core
 | 层 | 负责 | 不负责 |
 |---|---|---|
 | `agent-model` | 消息、工具 Schema、流式事件、Usage、`Model` 接口、结构化错误 | 任何 Provider 的 HTTP 实现 |
+| `agent-contract` | Task/TaskRun/RunState、Artifact/Evidence、Budget、Event、StepResult（纯数据协议） | 状态机、持久化、执行逻辑 |
 | `agent-core` | 最小 Tool Loop、事件流、取消、预算、Schema 校验、Steering/Context Hook | Task 生命周期与数据库 |
 | `agent-runtime` | TaskRun 状态机、Pattern Host、Checkpoint、Artifact/Evidence、Evaluator、HITL | 具体模型与业务工具 |
 | `agent-plugin` | 插件契约、Registry、Manifest、生命周期、MCP Tool Adapter | Go 原生动态插件加载 |

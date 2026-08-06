@@ -2,6 +2,7 @@
 # check-deps.sh — 核心模块依赖方向自动检查（PRD S8 / M0 退出条件）。
 #
 # 规则（架构文档 03-architecture-overview.md §6）：
+#   - agent-contract：仅依赖 agent-model
 #   - agent-model：不依赖任何内部 module
 #   - agent-core：仅依赖 agent-model
 #   - agent-plugin：仅依赖 agent-model、agent-core
@@ -20,17 +21,18 @@ PREFIX="github.com/mantis-layer/mts"
 # 每个 module → 允许依赖的内部 module 前缀集合（空格分隔；不含自身。
 # 按前缀匹配：允许依赖 X 意味着允许 X 及其全部子包。）
 declare -A ALLOWED=(
+  ["$PREFIX/agent-contract"]="$PREFIX/agent-model"
   ["$PREFIX/agent-model"]=""
   ["$PREFIX/agent-core"]="$PREFIX/agent-model"
   ["$PREFIX/agent-plugin"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/agent-compose"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin"
-  ["$PREFIX/agent-runtime"]="$PREFIX/agent-model $PREFIX/agent-core"
+  ["$PREFIX/agent-runtime"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract"
   ["$PREFIX/adapters/model-openai"]="$PREFIX/agent-model"
   ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core"
   ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
-  ["$PREFIX/examples/research_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
-  ["$PREFIX/examples/workflow_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-runtime $PREFIX/tools"
+  ["$PREFIX/examples/research_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/examples/workflow_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/tools"
 )
 
 # is_allowed 判断依赖 d 是否在允许前缀集合内。
