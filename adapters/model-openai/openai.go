@@ -27,13 +27,17 @@ type Config struct {
 	BaseURL string
 	// APIKey 认证密钥。
 	APIKey string
-	// Model 模型名称。
+	// Model 聊天/补全模型名称。
 	Model string
+	// EmbeddingModel embedding 模型名称；可选，为空时 Embed 回退使用 Model。
+	// 建议配置独立的 embedding 模型名（chat 模型未必支持 /embeddings 端点）。
+	EmbeddingModel string
 	// HTTPClient 可选；默认使用 60s 超时的客户端。
 	HTTPClient *http.Client
 }
 
-// Client 实现 agentmodel.Model，通过 OpenAI 兼容 /chat/completions 接口通信。
+// Client 实现 agentmodel.Model 与 agentmodel.EmbeddingProvider，
+// 通过 OpenAI 兼容 /chat/completions 与 /embeddings 接口通信。
 type Client struct {
 	cfg  Config
 	http *http.Client
@@ -62,6 +66,96 @@ func (c *Client) ModelName() string { return c.cfg.Model }
 
 func (c *Client) endpoint() string {
 	return strings.TrimRight(c.cfg.BaseURL, "/") + "/chat/completions"
+}
+
+func (c *Client) embeddingEndpoint() string {
+	return strings.TrimRight(c.cfg.BaseURL, "/") + "/embeddings"
+}
+
+// Embed 将 inputs 批量转换为向量嵌入，返回与 inputs 一一对应的向量。
+// 空输入返回空结果且不报错；响应中的维度不一致或数量不匹配会报结构化错误。
+func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
+	if len(inputs) == 0 {
+		return [][]float32{}, nil
+	}
+	model := c.cfg.EmbeddingModel
+	if model == "" {
+		model = c.cfg.Model
+	}
+	payload := embeddingRequest{Model: model, Input: inputs}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("modelopenai: 序列化请求: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.embeddingEndpoint(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("modelopenai: 构造请求: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, mapTransportError(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, mapHTTPError(resp.StatusCode, string(raw))
+	}
+
+	var out struct {
+		Data []struct {
+			Index     int       `json:"index"`
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, &agentmodel.ModelError{Kind: agentmodel.ErrorKindUnknown, Message: "解析响应失败", Cause: err}
+	}
+	if len(out.Data) != len(inputs) {
+		return nil, &agentmodel.ModelError{Kind: agentmodel.ErrorKindServer, Message: fmt.Sprintf("embedding 数量不匹配: 输入 %d 条, 返回 %d 条", len(inputs), len(out.Data))}
+	}
+
+	// 全部 index 相同（端点未提供 index）时信任返回顺序；否则按 index 排列并校验连续性。
+	allSame := true
+	for _, d := range out.Data {
+		if d.Index != out.Data[0].Index {
+			allSame = false
+			break
+		}
+	}
+	if !allSame {
+		sort.SliceStable(out.Data, func(i, j int) bool { return out.Data[i].Index < out.Data[j].Index })
+		for i, d := range out.Data {
+			if d.Index != i {
+				return nil, &agentmodel.ModelError{Kind: agentmodel.ErrorKindServer, Message: fmt.Sprintf("embedding index 与输入顺序不一致: 位置 %d 的 index=%d", i, d.Index)}
+			}
+		}
+	}
+
+	// 维度一致性校验：首条维度必须非零，其余条目必须与首条一致。
+	dim := len(out.Data[0].Embedding)
+	if dim == 0 {
+		return nil, &agentmodel.ModelError{Kind: agentmodel.ErrorKindServer, Message: "embedding 维度为 0"}
+	}
+	for i := 1; i < len(out.Data); i++ {
+		if len(out.Data[i].Embedding) != dim {
+			return nil, &agentmodel.ModelError{Kind: agentmodel.ErrorKindServer, Message: fmt.Sprintf("embedding 维度不一致: 第 0 条 %d 维, 第 %d 条 %d 维", dim, i, len(out.Data[i].Embedding))}
+		}
+	}
+
+	vecs := make([][]float32, len(out.Data))
+	for i, d := range out.Data {
+		vecs[i] = d.Embedding
+	}
+	return vecs, nil
+}
+
+type embeddingRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
 }
 
 type chatRequest struct {

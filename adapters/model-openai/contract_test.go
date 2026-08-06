@@ -65,6 +65,29 @@ func newTestClient(t *testing.T, ep testEndpoint) *Client {
 	return c
 }
 
+// loadEmbeddingEndpoints 读取 MTS_EMBEDDING_MODEL 与 MTS2_EMBEDDING_MODEL
+// （baseURL/APIKey 复用 MTS_*/MTS2_*，model 字段即 embedding 模型名）；
+// 返回 ok=false 表示未配置任何 embedding 端点。
+func loadEmbeddingEndpoints(t *testing.T) (eps []testEndpoint, ok bool) {
+	t.Helper()
+	add := func(prefix string) {
+		baseURL := os.Getenv(prefix + "_BASEURL")
+		apiKey := os.Getenv(prefix + "_API_KEY")
+		model := os.Getenv(prefix + "_EMBEDDING_MODEL")
+		if baseURL == "" || apiKey == "" || model == "" {
+			return
+		}
+		eps = append(eps, testEndpoint{name: prefix, baseURL: baseURL, apiKey: apiKey, model: model})
+	}
+	add("MTS")
+	add("MTS2")
+	if len(eps) == 0 {
+		t.Log("未配置 MTS_EMBEDDING_MODEL/MTS2_EMBEDDING_MODEL，embedding 契约测试跳过")
+		return nil, false
+	}
+	return eps, true
+}
+
 func userMsg(content string) []agentmodel.Message {
 	return []agentmodel.Message{{Role: agentmodel.RoleUser, Content: content}}
 }
@@ -232,6 +255,38 @@ func TestRedactSecrets(t *testing.T) {
 		if got != cse.want {
 			t.Fatalf("redactSecrets(%q) = %q, 期望 %q", cse.in, got, cse.want)
 		}
+	}
+}
+
+// TestContract_Embedding 验证 embedding 契约：批量输入返回同维非零向量。
+// 未配置 MTS_EMBEDDING_MODEL 时跳过。
+func TestContract_Embedding(t *testing.T) {
+	eps, ok := loadEmbeddingEndpoints(t)
+	if !ok {
+		t.Skip("无 embedding 测试端点")
+	}
+	for _, ep := range eps {
+		t.Run(ep.name, func(t *testing.T) {
+			c := newTestClient(t, ep)
+			vecs, err := c.Embed(context.Background(), []string{"hello", "世界"})
+			if err != nil {
+				if skipIfNetworkUnreachable(t, err) {
+					return
+				}
+				t.Fatalf("Embed 失败: %v", err)
+			}
+			if len(vecs) != 2 {
+				t.Fatalf("向量数量=%d 期望 2", len(vecs))
+			}
+			dim := len(vecs[0])
+			if dim == 0 {
+				t.Fatal("向量维度为 0")
+			}
+			if len(vecs[1]) != dim {
+				t.Fatalf("向量维度不一致: %d vs %d", dim, len(vecs[1]))
+			}
+			t.Logf("dim=%d", dim)
+		})
 	}
 }
 
