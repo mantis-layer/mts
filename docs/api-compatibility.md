@@ -9,19 +9,21 @@
   - `Y` 次版本：向后兼容的新功能。
   - `Z` 补丁：向后兼容的缺陷修复。
 - **v0.x 阶段**：`0.Y.Z` 中 `Y` 可包含有限的不兼容调整（PATCH 前向兼容）；v1.0 起严格 SemVer。
-- 每个 Module 独立发版（`agent-model`、`agent-core`、`agent-plugin`、`agent-compose`、`agent-runtime`、`adapters/model-openai`、`tools`、`cli`）。
+- 每个 Module 独立发版（`agent-model`、`agent-contract`、`agent-core`、`agent-plugin`、`agent-compose`、`agent-runtime`、`adapters/model-openai`、`tools`、`cli`）。
 - 兼容承诺：不删除公开符号；破坏性变更走主版本号并附迁移说明。
 
 ## Module 边界（依赖方向，见 `scripts/check-deps.sh`）
 
 ```
-agent-model  ←  agent-core  ←  agent-plugin / agent-compose / agent-runtime
+agent-model  ←  agent-contract
+agent-model  ←  agent-core  ←  agent-plugin / agent-compose
+agent-model / agent-core / agent-contract  ←  agent-runtime
 agent-model  ←  adapters/model-openai
 agent-model / agent-core  ←  tools
 以上全部 ←  cli（入口）  ←  examples
 ```
 
-规则：**agent-model 不依赖任何内部 Module；agent-core 仅依赖 agent-model；内部 Module（非 examples）不得依赖 agent-runtime**（Runtime 是上层；`examples/research_agent` / `examples/workflow_agent` 作为示例层是唯一允许依赖 runtime 的入口）。`scripts/check-deps.sh` 在 CI 中自动执行。
+规则：**agent-model 不依赖任何内部 Module；agent-contract 仅依赖 agent-model；agent-core 仅依赖 agent-model；内部 Module（非 examples）不得依赖 agent-runtime**（Runtime 是上层；`examples/research_agent` / `examples/workflow_agent` 作为示例层是唯一允许依赖 runtime 的入口）。`scripts/check-deps.sh` 在 CI 中自动执行。
 
 ## 公共 API（v0.1）
 
@@ -35,6 +37,17 @@ agent-model / agent-core  ←  tools
 | `Request` / `Response` / `Usage` | 请求、响应与 token 用量 |
 | `StreamEvent`（Delta/ToolCall/Usage/Finish/Error） | 流式事件 |
 | `ModelError` / `ErrorKind` | 结构化模型错误（auth/rate_limit/timeout/…） |
+
+### agent-contract（纯协议类型，依赖 agent-model）
+
+| 符号 | 说明 |
+|---|---|
+| `RunState`（Created/Running/Waiting/Completed/Failed/Cancelled） | TaskRun 生命周期状态枚举 |
+| `Task` / `TaskRun` / `TaskResult` | 任务定义、执行实例与产出 |
+| `ArtifactType` / `Artifact` / `Evidence` | 结构化产出与来源证据 |
+| `Budget`（MaxIterations/MaxToolCalls） | 执行预算 |
+| `EventKind` / `RuntimeEvent` | Runtime 事件类型与事件结构（9 种事件） |
+| `StepResult`（Done/NeedHuman/Terminated/Artifacts/Evidence） | Pattern 单步执行结果 |
 
 ### agent-core（最小 Agent Loop）
 
