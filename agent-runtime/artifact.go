@@ -1,29 +1,19 @@
 package agentruntime
 
-import "time"
+import contract "github.com/mantis-layer/mts/agent-contract"
 
-// ArtifactType 标识 Artifact 的类型。
-type ArtifactType string
+// ArtifactType 上移至 agent-contract；runtime 通过 type alias 保持 API 兼容。
+type ArtifactType = contract.ArtifactType
 
+// Artifact 上移至 agent-contract。
+type Artifact = contract.Artifact
+
+// Evidence 上移至 agent-contract。
+type Evidence = contract.Evidence
+
+// Re-export constants。
 const (
-	ArtifactText  ArtifactType = "text"
-	ArtifactJSON  ArtifactType = "json"
-	ArtifactTable ArtifactType = "table"
+	ArtifactText  = contract.ArtifactText
+	ArtifactJSON  = contract.ArtifactJSON
+	ArtifactTable = contract.ArtifactTable
 )
-
-// Artifact 是 TaskRun 的结构化产出（FR-004）。
-type Artifact struct {
-	ID        string
-	TaskRunID string
-	Name      string
-	Type      ArtifactType
-	Content   string // JSON 编码内容
-	CreatedAt time.Time
-}
-
-// Evidence 将 Artifact 内容关联到来源（供 Evaluator 与引用）。
-type Evidence struct {
-	ArtifactID string
-	Source     string
-	Quote      string
-}

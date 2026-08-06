@@ -3,6 +3,7 @@ module github.com/mantis-layer/mts/agent-runtime
 go 1.25.4
 
 require (
+	github.com/mantis-layer/mts/agent-contract v0.0.0
 	github.com/mantis-layer/mts/agent-core v0.0.0
 	github.com/mantis-layer/mts/agent-model v0.0.0
 	modernc.org/sqlite v1.56.0
@@ -21,6 +22,7 @@ require (
 )
 
 replace (
+	github.com/mantis-layer/mts/agent-contract => ../agent-contract
 	github.com/mantis-layer/mts/agent-core => ../agent-core
 	github.com/mantis-layer/mts/agent-model => ../agent-model
 )

@@ -1,30 +1,25 @@
 package agentruntime
 
-import "time"
+import contract "github.com/mantis-layer/mts/agent-contract"
 
-// EventKind 标识 Runtime 事件类型（FR-009 Observability）。
-type EventKind string
+// EventKind 上移至 agent-contract；runtime 通过 type alias 保持 API 兼容。
+type EventKind = contract.EventKind
 
+// RuntimeEvent 上移至 agent-contract。
+type RuntimeEvent = contract.RuntimeEvent
+
+// Re-export constants。
 const (
-	EventTaskRunCreated      EventKind = "taskrun.created"
-	EventTaskRunStarted      EventKind = "taskrun.started"
-	EventStateChanged        EventKind = "taskrun.state_changed"
-	EventTaskRunCompleted    EventKind = "taskrun.completed"
-	EventTaskRunFailed       EventKind = "taskrun.failed"
-	EventTaskRunCancelled    EventKind = "taskrun.cancelled"
-	EventBudgetExceeded      EventKind = "taskrun.budget_exceeded"
-	EventHumanInputRequested EventKind = "taskrun.human_input_requested"
-	EventHumanInputReceived  EventKind = "taskrun.human_input_received"
-	EventCheckpointSaved     EventKind = "taskrun.checkpoint_saved"
-	EventArtifactCreated     EventKind = "artifact.created"
-	EventEvaluatorResult     EventKind = "taskrun.evaluator_result"
+	EventTaskRunCreated      = contract.EventTaskRunCreated
+	EventTaskRunStarted      = contract.EventTaskRunStarted
+	EventStateChanged        = contract.EventStateChanged
+	EventTaskRunCompleted    = contract.EventTaskRunCompleted
+	EventTaskRunFailed       = contract.EventTaskRunFailed
+	EventTaskRunCancelled    = contract.EventTaskRunCancelled
+	EventBudgetExceeded      = contract.EventBudgetExceeded
+	EventHumanInputRequested = contract.EventHumanInputRequested
+	EventHumanInputReceived  = contract.EventHumanInputReceived
+	EventCheckpointSaved     = contract.EventCheckpointSaved
+	EventArtifactCreated     = contract.EventArtifactCreated
+	EventEvaluatorResult     = contract.EventEvaluatorResult
 )
-
-// RuntimeEvent 是一次 Runtime 事件。
-type RuntimeEvent struct {
-	ID        string
-	TaskRunID string
-	Kind      EventKind
-	Data      map[string]any
-	Timestamp time.Time
-}

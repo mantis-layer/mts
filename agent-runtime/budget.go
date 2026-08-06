@@ -1,15 +1,12 @@
 package agentruntime
 
-// Budget 是 TaskRun 的执行预算（FR-004）。
-type Budget struct {
-	// MaxIterations 模型调用轮次上限；0 表示不限。
-	MaxIterations int
-	// MaxToolCalls 工具调用次数上限；0 表示不限。
-	MaxToolCalls int
-}
+import contract "github.com/mantis-layer/mts/agent-contract"
 
-// Exceeded 判断当前消耗是否超出预算。
-func (b Budget) Exceeded(iterations, toolCalls int) bool {
+// Budget 上移至 agent-contract；runtime 通过 type alias 保持 API 兼容。
+type Budget = contract.Budget
+
+// budgetExceeded 判断当前消耗是否超出预算（原 Budget.Exceeded 方法，内化为函数）。
+func budgetExceeded(b Budget, iterations, toolCalls int) bool {
 	if b.MaxIterations > 0 && iterations >= b.MaxIterations {
 		return true
 	}

@@ -3,6 +3,7 @@ go 1.25.4
 use (
 	./adapters/model-openai
 	./agent-compose
+	./agent-contract
 	./agent-core
 	./agent-model
 	./agent-plugin

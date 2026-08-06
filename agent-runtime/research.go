@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	agentcore "github.com/mantis-layer/mts/agent-core"
+	agentmodel "github.com/mantis-layer/mts/agent-model"
 )
 
 // ResearchPattern 执行多轮研究（复用 Tool Loop Agent，检索源由已注册 Tool 提供），
@@ -54,7 +55,7 @@ func (p *ResearchPattern) Execute(ctx context.Context, run *TaskRun) (*StepResul
 		Evidence:   evidence,
 		Iterations: res.Iterations,
 		ToolCalls:  res.ToolCalls,
-		Usage: Usage{
+		Usage: agentmodel.Usage{
 			PromptTokens:     res.Usage.PromptTokens,
 			CompletionTokens: res.Usage.CompletionTokens,
 			TotalTokens:      res.Usage.TotalTokens,

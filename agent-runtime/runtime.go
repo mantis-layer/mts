@@ -200,7 +200,7 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 			_ = rt.cancelRun(runCtx, run, "context cancelled")
 			return rt.storage.GetRun(ctx, runID)
 		}
-		if rt.budget.Exceeded(run.Iterations, run.ToolCalls) {
+		if budgetExceeded(rt.budget, run.Iterations, run.ToolCalls) {
 			_ = rt.addEvent(ctx, run, EventBudgetExceeded, map[string]any{
 				"iterations": run.Iterations, "tool_calls": run.ToolCalls,
 			})
@@ -301,7 +301,7 @@ func (rt *Runtime) runLocked(ctx context.Context, runID string) (*TaskRun, error
 		}
 
 		if step.Output != "" {
-			run.SummaryAppend(step.Output)
+			summaryAppend(run, step.Output)
 		}
 		// Checkpoint：仅在 running 态可写——取消后（cancelled）不覆盖
 		if ok, err := rt.storage.UpdateRunIf(ctx, run, RunStateRunning); err != nil {
@@ -560,7 +560,8 @@ func (rt *Runtime) addEvent(ctx context.Context, run *TaskRun, kind EventKind, d
 	return rt.storage.AddEvent(ctx, ev)
 }
 
-func mergeUsage(dst *agentmodel.Usage, u Usage) {
+// mergeUsage 将单步 Usage 累加到 run 的累计 Usage。
+func mergeUsage(dst *agentmodel.Usage, u agentmodel.Usage) {
 	dst.PromptTokens += u.PromptTokens
 	dst.CompletionTokens += u.CompletionTokens
 	dst.TotalTokens += u.TotalTokens
