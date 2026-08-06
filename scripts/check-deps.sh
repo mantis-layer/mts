@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # check-deps.sh — 核心模块依赖方向自动检查（PRD S8 / M0 退出条件）。
 #
-# 规则（架构文档 03-architecture-overview.md §6）：
+# 规则（架构文档 03-architecture-overview.md §6 + PRD v3 §Rules）：
 #   - agent-contract：仅依赖 agent-model
 #   - agent-model：不依赖任何内部 module
-#   - agent-core：仅依赖 agent-model
-#   - agent-plugin：仅依赖 agent-model、agent-core
-#   - agent-compose：仅依赖 agent-model、agent-core、agent-plugin
+#   - agent-core：仅依赖 agent-model、agent-contract（PRD v3：agent-core → agent-contract → agent-model）
+#   - agent-plugin：仅依赖 agent-model、agent-core、agent-contract
+#   - agent-compose：仅依赖 agent-model、agent-core、agent-plugin、agent-contract
 #   - adapters/*：仅依赖 agent-model
-#   - tools：仅依赖 agent-model、agent-core
+#   - tools：仅依赖 agent-model、agent-core、agent-contract
 #   - cli：仅依赖以上全部（入口层）
 #   - examples/*：仅依赖以上全部（示例层）；research/workflow 示例额外依赖 agent-runtime
 #   - 任何内部 module（非 examples）不得依赖 agent-runtime（Runtime 仅示例层使用）
@@ -23,14 +23,14 @@ PREFIX="github.com/mantis-layer/mts"
 declare -A ALLOWED=(
   ["$PREFIX/agent-contract"]="$PREFIX/agent-model"
   ["$PREFIX/agent-model"]=""
-  ["$PREFIX/agent-core"]="$PREFIX/agent-model"
-  ["$PREFIX/agent-plugin"]="$PREFIX/agent-model $PREFIX/agent-core"
-  ["$PREFIX/agent-compose"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin"
+  ["$PREFIX/agent-core"]="$PREFIX/agent-model $PREFIX/agent-contract"
+  ["$PREFIX/agent-plugin"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract"
+  ["$PREFIX/agent-compose"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-contract"
   ["$PREFIX/agent-runtime"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract"
   ["$PREFIX/adapters/model-openai"]="$PREFIX/agent-model"
-  ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core"
-  ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
-  ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract"
+  ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/research_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/workflow_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/tools"
 )

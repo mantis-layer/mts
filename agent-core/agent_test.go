@@ -102,7 +102,7 @@ func (t *mockTool) Execute(ctx context.Context, input map[string]any) (map[strin
 	return map[string]any{"ok": true}, nil
 }
 
-func newTestAgent(m *mockModel, reg *Registry, opts Options) (*Agent, *[]Event) {
+func newTestAgent(m agentmodel.Model, reg *Registry, opts Options) (*Agent, *[]Event) {
 	var events []Event
 	opts.OnEvent = func(ev Event) { events = append(events, ev) }
 	if opts.MaxToolCalls == 0 {
