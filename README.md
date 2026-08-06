@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/mts-mantis-hero.png" alt="MTS 的复古机械螳螂主视觉" width="100%" />
+  <img src="assets/mts-mantis-hero.png" alt="Mantis Forge 的复古机械螳螂主视觉" width="100%" />
 </p>
 
-<h1 align="center">MTS</h1>
+<h1 align="center">Mantis Forge</h1>
 
 <p align="center">
-  <strong>面向 Go 开发者的模块化 Agent Runtime 与 SDK。</strong><br />
+  <strong>搭建属于你的数字伙伴——面向 Go 开发者的模块化 Agent Runtime 与 SDK。</strong><br />
   小核心，强扩展；任务优先，可验证、可控制、可恢复。
 </p>
 
@@ -25,15 +25,17 @@
 
 ---
 
-MTS 提供构建 Agent 应用所需的执行基础设施：统一的模型协议、最小 Model → Tool 循环、可组合插件、Task 生命周期与持久化、Artifact / Evidence / Evaluator，以及面向真实运行的预算、取消和人工介入能力。
+Mantis Forge 提供构建 Agent 应用所需的执行基础设施：统一的模型协议、最小 Model → Tool 循环、可组合插件、Task 生命周期与持久化、Artifact / Evidence / Evaluator，以及面向真实运行的预算、取消和人工介入能力。
 
-它不是另一个 Prompt 框架。MTS 让你用可替换的 Model、Tool、Pattern、Storage 和 Policy，组合出研究助手、确定性工作流、数据 Agent 或企业私有化 Agent。
+它不是另一个 Prompt 框架。Mantis Forge 让你用可替换的 Model、Tool、Pattern、Storage 和 Policy，组合出研究助手、确定性工作流、数据 Agent 或企业私有化 Agent。
+
+> **品牌与代码命名**：产品品牌为 Mantis Forge；代码模块名 `agent-*`、CLI `mts`、环境变量 `MTS_*` 为内部稳定标识。这是刻意决策（类比 Kubernetes：仓库与代码命名稳定，产品品牌独立），并非缺陷。
 
 > **v0.1**：公共 API 仍在收敛中。请以源码、测试和[在线文档](https://mantis-layer.github.io/mts/)为当前行为依据。
 
 ## 快速开始
 
-MTS 当前提供一个基于 OpenAI 兼容端点的最小 CLI。它会注册 `file_reader` 与 `calculator`，运行一个 Tool Loop Agent。
+Mantis Forge 当前提供一个基于 OpenAI 兼容端点的最小 CLI。它会注册 `file_reader` 与 `calculator`，运行一个 Tool Loop Agent。
 
 ```bash
 git clone https://github.com/mantis-layer/mts.git
@@ -48,9 +50,9 @@ go run . --task "读取 ../examples/data.json，用 calculator 计算 sales 字�
 
 也可以把配置放在本机 `.env.local`，或通过 `--baseurl`、`--api-key`、`--model` 传入。使用 `--json` 可得到 JSON Lines 事件流。
 
-## 为什么是 MTS
+## 为什么是 Mantis Forge
 
-| 关注点 | MTS 的边界 |
+| 关注点 | Mantis Forge 的边界 |
 |---|---|
 | **最小 Agent Loop** | `agent-core` 只解决 Model → Tool → Model、事件、取消、Steering 与 Context Hook。 |
 | **任务而非聊天记录** | `agent-runtime` 用 Task / TaskRun / Artifact / Evidence / Evaluator 表达可管理的工作。 |
@@ -121,7 +123,7 @@ npm run docs:dev
 
 ## 螳螂
 
-MTS 的品牌形象是一只机械螳螂：观察、等待、精确行动。它对应的不是“更复杂的 Agent”，而是对每次模型调用、工具副作用和任务状态保持清晰边界与控制。
+Mantis Forge 的品牌形象是一只机械螳螂：观察、等待、精确行动。它对应的不是“更复杂的 Agent”，而是对每次模型调用、工具副作用和任务状态保持清晰边界与控制。
 
 ## 参与贡献
 

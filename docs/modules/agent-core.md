@@ -1,6 +1,6 @@
 # agent-core — 最小 Agent Loop
 
-`agent-core` 提供 **Model → Tool → Model** 最小循环运行时：注册工具、流式调用模型、Schema 校验参数、执行工具并把结果回写上下文，直到模型不再请求工具。它是 MTS 的执行核心，但不承担 Task 生命周期、持久化或业务逻辑。
+`agent-core` 提供 **Model → Tool → Model** 最小循环运行时：注册工具、流式调用模型、Schema 校验参数、执行工具并把结果回写上下文，直到模型不再请求工具。它是 Mantis Forge 的执行核心，但不承担 Task 生命周期、持久化或业务逻辑。
 
 模块路径：`github.com/mantis-layer/mts/agent-core`（仅依赖 `agent-model`）
 

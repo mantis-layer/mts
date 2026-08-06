@@ -2,9 +2,9 @@
 layout: home
 
 hero:
-  name: MTS
-  text: 模块化 Agent Runtime 与 SDK
-  tagline: 用 Go 组合可验证、可控制、可恢复的 Agent。
+  name: Mantis Forge
+  text: 搭建属于你的数字伙伴
+  tagline: 面向 Go 开发者的模块化 Agent Runtime 与 SDK——可验证、可控制、可恢复。
   actions:
     - theme: brand
       text: 开始使用
@@ -24,6 +24,8 @@ features:
 
 ## 从一个 Tool Loop 开始
 
-MTS 的最小闭环是：模型决定调用工具，工具结果回写上下文，模型输出最终答案。需要更长生命周期时，再把这个闭环放入 `agent-runtime` 的 TaskRun 中。
+Mantis Forge 的最小闭环是：模型决定调用工具，工具结果回写上下文，模型输出最终答案。需要更长生命周期时，再把这个闭环放入 `agent-runtime` 的 TaskRun 中。
 
 阅读 [开始使用](/guide/getting-started) 运行内置 CLI，或进入 [模块总览](/modules/overview) 选择要集成的能力。
+
+> **品牌与代码命名**：产品品牌为 Mantis Forge；代码模块名 `agent-*`、CLI `mts`、环境变量 `MTS_*` 为内部稳定标识（刻意决策，类比 Kubernetes：仓库与代码命名稳定，产品品牌独立）。

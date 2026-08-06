@@ -1,6 +1,6 @@
 # API 兼容说明（v0.1）
 
-本文件描述 MTS v0.1 的公共 API 面与兼容承诺（Roadmap M6：公共 API 有示例和兼容说明）。
+本文件描述 Mantis Forge v0.1 的公共 API 面与兼容承诺（Roadmap M6：公共 API 有示例和兼容说明）。
 
 ## 版本与兼容策略
 

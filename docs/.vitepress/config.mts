@@ -4,14 +4,14 @@ const isGitHubPages = process.env.GITHUB_ACTIONS === "true";
 
 export default defineConfig({
   lang: "zh-CN",
-  title: "MTS",
+  title: "Mantis Forge",
   description: "模块化 Agent Runtime 与 SDK",
   base: isGitHubPages ? "/mts/" : "/",
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
     logo: "/logo.svg",
-    siteTitle: "MTS 文档",
+    siteTitle: "Mantis Forge 文档",
     nav: [
       { text: "开始使用", link: "/guide/getting-started" },
       { text: "开发者", link: "/development/local-development" },
