@@ -1,6 +1,6 @@
 # 开始使用
 
-MTS 是一个 Go 多模块仓库。最短路径是通过内置 CLI，使用 OpenAI 兼容端点运行一个带 `file_reader` 和 `calculator` 的 Tool Loop Agent。
+Mantis Forge 是一个 Go 多模块仓库。最短路径是通过内置 CLI，使用 OpenAI 兼容端点运行一个带 `file_reader` 和 `calculator` 的 Tool Loop Agent。
 
 ## 前置条件
 
