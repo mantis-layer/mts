@@ -72,6 +72,8 @@ final, _ := rt.Run(ctx, run.ID)
 
 ## 下一步
 
-- [核心概念](/guide/concepts) — TaskRun、Pattern、Artifact/Evidence/Evaluator
+- [核心概念](/guide/concepts) — TaskRun、Pattern、Artifact/Evidence/Evaluator；v2.0 Persona/Memory/ContextBuilder
 - [架构与边界](/guide/architecture) — 分层与设计决策
+- [agent-runtime 模块](/modules/agent-runtime) — Persona/Memory/ContextBuilder 默认实现与跨会话恢复用法
+- [tools/cli/examples](/modules/tools-cli-examples) — 三示例升级 + `examples/integration/` 集成验收测试
 - [API 兼容说明](/api-compatibility) — 公共 API 与版本策略

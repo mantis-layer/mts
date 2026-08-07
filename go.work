@@ -9,6 +9,7 @@ use (
 	./agent-plugin
 	./agent-runtime
 	./cli
+	./examples/integration
 	./examples/research_agent
 	./examples/tool_loop_agent
 	./examples/workflow_agent

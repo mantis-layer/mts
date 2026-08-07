@@ -3,6 +3,7 @@ module github.com/mantis-layer/mts/examples/workflow_agent
 go 1.25.4
 
 require (
+	github.com/mantis-layer/mts/agent-contract v0.0.0
 	github.com/mantis-layer/mts/agent-runtime v0.0.0
 	github.com/mantis-layer/mts/tools v0.0.0
 )
@@ -23,6 +24,7 @@ require (
 )
 
 replace (
+	github.com/mantis-layer/mts/agent-contract => ../../agent-contract
 	github.com/mantis-layer/mts/agent-core => ../../agent-core
 	github.com/mantis-layer/mts/agent-model => ../../agent-model
 	github.com/mantis-layer/mts/agent-plugin => ../../agent-plugin
