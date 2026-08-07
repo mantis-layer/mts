@@ -10,7 +10,8 @@
 #   - adapters/*：仅依赖 agent-model
 #   - tools：仅依赖 agent-model、agent-core、agent-contract
 #   - cli：仅依赖以上全部（入口层）
-#   - examples/*：仅依赖以上全部（示例层）；research/workflow 示例额外依赖 agent-runtime
+#   - examples/*：仅依赖以上全部（示例层）；三示例（tool_loop/research/workflow）+ integration 均依赖 agent-runtime
+#     （v2.0：三示例共享 Persona + Memory + ContextBuilder 抽象，统一使用 agent-runtime 的 VectorMemoryStore/DefaultContextBuilder）
 #   - 任何内部 module（非 examples）不得依赖 agent-runtime（Runtime 仅示例层使用）
 #
 # 用法：scripts/check-deps.sh（在仓库根执行）
@@ -30,9 +31,10 @@ declare -A ALLOWED=(
   ["$PREFIX/adapters/model-openai"]="$PREFIX/agent-model"
   ["$PREFIX/tools"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract"
   ["$PREFIX/cli"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
-  ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/adapters/model-openai $PREFIX/tools"
+  ["$PREFIX/examples/tool_loop_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/research_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
   ["$PREFIX/examples/workflow_agent"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-plugin $PREFIX/agent-contract $PREFIX/agent-runtime $PREFIX/tools"
+  ["$PREFIX/examples/integration"]="$PREFIX/agent-model $PREFIX/agent-core $PREFIX/agent-contract $PREFIX/agent-plugin $PREFIX/agent-compose $PREFIX/agent-runtime $PREFIX/adapters/model-openai $PREFIX/tools"
 )
 
 # is_allowed 判断依赖 d 是否在允许前缀集合内。

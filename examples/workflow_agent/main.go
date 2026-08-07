@@ -1,9 +1,16 @@
-// Command workflow_agent 是 Workflow Pattern 验证示例：多步骤工作流
-// （读取 → 人工审批 → 汇总），展示 agent-runtime 的人工暂停/恢复。
+// Command workflow_agent 是 Workflow Pattern 验证示例（v2.0 升级，Issue #46）：
+// 多步骤工作流（读取 → 人工审批 → 汇总），展示 agent-runtime 的人工暂停/恢复。
+//
+// v2.0 新增：加载 Persona + MemoryStore（A1/A2/S11/P1），并把 HITL 人工输入
+// 记录进 ShortTerm 记忆（跨会话保留审批历史）。
 //
 // 运行（在 examples/workflow_agent 目录）：
 //
-//	go run . --task "读取 ../data.json 并按月汇总"
+//	go run . --task "读取 ../data.json 并按月汇总" --approve
+//
+// 启用记忆持久化（记录审批历史）：
+//
+//	go run . --persona-id approver --memory ./mem.db --approve
 package main
 
 import (
@@ -17,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	agentcontract "github.com/mantis-layer/mts/agent-contract"
 	agentruntime "github.com/mantis-layer/mts/agent-runtime"
 	"github.com/mantis-layer/mts/tools"
 )
@@ -26,9 +34,41 @@ func main() {
 
 	task := flag.String("task", "", "工作流任务描述")
 	autoApprove := flag.Bool("approve", false, "自动批准人工审批节点（非交互）")
+	// v2.0 Persona + Memory 抽象（A1/A2/S11）。
+	personaID := flag.String("persona-id", "workflow-demo", "Persona ID（跨会话身份锚点）")
+	personaName := flag.String("persona-name", "审批助手", "Persona 名称")
+	memoryPath := flag.String("memory", "", "记忆 SQLite 文件路径（空=不记录审批历史）")
+	embedDim := flag.Int("embed-dim", 1536, "embedding 维度（启用了 memory 但无 embedding provider 时可传 16）")
 	flag.Parse()
 
-	// 1. 组装 Workflow：三个步骤（读取 → 人工审批 → 汇总）
+	// 1. Persona + MemoryStore（v2.0 三件套的子集，A1/A2/S11/P1）。
+	//    workflow 形态无需模型，故不构造 ContextBuilder（注入由模型驱动的形态使用）；
+	//    这里用 MemoryStore 记录 HITL 输入到 ShortTerm 层。
+	persona := &agentcontract.Persona{
+		ID:           *personaID,
+		Name:         *personaName,
+		Role:         "approver",
+		SystemPrompt: "你是一名负责审批的工作流助手。",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := persona.Validate(); err != nil {
+		log.Fatalf("Persona 校验: %v", err)
+	}
+
+	var memStore *agentruntime.VectorMemoryStore
+	if *memoryPath != "" {
+		// workflow 形态无 embedding provider：传 nil，VectorMemoryStore 退化为规则检索
+		// （ShortTerm 按时间倒序检索，足以支撑审批历史场景）。
+		var err error
+		memStore, err = agentruntime.NewVectorMemoryStore(*memoryPath, nil, *embedDim)
+		if err != nil {
+			log.Fatalf("创建 MemoryStore: %v", err)
+		}
+		defer memStore.Close()
+	}
+
+	// 2. 组装 Workflow：三个步骤（读取 → 人工审批 → 汇总）
 	fileReader := tools.FileReader{}
 	steps := []agentruntime.WorkflowStep{
 		{
@@ -60,7 +100,7 @@ func main() {
 		},
 	}
 
-	// 2. Runtime + Workflow Pattern
+	// 3. Runtime + Workflow Pattern
 	rt, err := agentruntime.NewRuntime(
 		agentruntime.NewMemoryStorage(),
 		agentruntime.Budget{MaxIterations: 10},
@@ -73,15 +113,18 @@ func main() {
 		log.Fatalf("注册 WorkflowPattern: %v", err)
 	}
 
-	// 3. 提交并运行
+	// 4. 提交并运行
 	run, err := rt.SubmitTask(context.Background(), &agentruntime.Task{
-		ID:   "workflow-demo-" + time.Now().Format("20060102150405"),
-		Name: "workflow-demo", Pattern: "workflow", Input: *task,
+		ID:        "workflow-demo-" + time.Now().Format("20060102150405"),
+		Name:      "workflow-demo",
+		Pattern:   "workflow",
+		Input:     *task,
+		PersonaID: persona.ID,
 	})
 	if err != nil {
 		log.Fatalf("提交任务: %v", err)
 	}
-	fmt.Printf("已提交任务: %s (run=%s)\n", run.TaskID, run.ID)
+	fmt.Printf("已提交任务: %s (run=%s, persona=%s)\n", run.TaskID, run.ID, persona.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -90,7 +133,7 @@ func main() {
 		_, _ = rt.Run(ctx, run.ID)
 	}()
 
-	// 4. 轮询：WAITING_HUMAN 时收集人工输入并提交
+	// 5. 轮询：WAITING_HUMAN 时收集人工输入、提交、并记录到 ShortTerm 记忆（v2.0）。
 	reader := bufio.NewReader(os.Stdin)
 	var lastProgress string
 	for {
@@ -127,6 +170,12 @@ func main() {
 				fmt.Println("（输入为空，请重新输入）")
 				continue
 			}
+			// v2.0：把 HITL 输入记录进 ShortTerm 记忆（A1/A2/S11/P1，跨会话保留审批历史）。
+			if memStore != nil {
+				if err := saveHumanInput(context.Background(), memStore, persona.ID, prompt, answer); err != nil {
+					log.Printf("记录 HITL 输入到 ShortTerm 失败: %v", err)
+				}
+			}
 			if _, err := rt.SubmitHumanInput(context.Background(), run.ID, answer); err != nil {
 				log.Fatalf("提交人工输入: %v", err)
 			}
@@ -143,6 +192,22 @@ finish:
 	if final.State == agentruntime.RunStateFailed {
 		fmt.Printf("错误: %v\n", final.Error)
 	}
+	if memStore != nil {
+		fmt.Printf("[记忆] HITL 输入已记录到 ShortTerm（persona=%s）\n", persona.ID)
+	}
+}
+
+// saveHumanInput 把一次 HITL 输入记录进 ShortTerm 记忆层。
+func saveHumanInput(ctx context.Context, store *agentruntime.VectorMemoryStore, personaID, prompt, answer string) error {
+	m := &agentcontract.Memory{
+		ID:        fmt.Sprintf("%s-hitl-%d", personaID, time.Now().UnixNano()),
+		PersonaID: personaID,
+		Layer:     agentcontract.MemoryLayerShortTerm,
+		Content:   fmt.Sprintf("审批提问：%s | 用户决定：%s", prompt, answer),
+		Tags:      []string{"hitl", "approval"},
+		CreatedAt: time.Now(),
+	}
+	return store.Save(ctx, m)
 }
 
 // loadEnvFile 从当前目录向上查找 .env.local 并加载（不覆盖已有 env）。

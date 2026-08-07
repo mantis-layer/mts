@@ -59,3 +59,13 @@ running → waiting（HITL：等待人工输入）→ running
 - `Budget{MaxIterations, MaxToolCalls}`：超限 → `failed` + `EventBudgetExceeded`。
 - 取消：context cancel（执行中）或 `Runtime.Cancel` API（触发执行中 Run 的取消函数 + CAS 迁移终态）。
 - 人工介入：`waiting` 状态 + `SubmitHumanInput`，审批拒绝经 `Terminated` 以 `failed` 终止，不进 Evaluator。
+
+## Persona、Memory 与 ContextBuilder（v2.0：数字伙伴的身份/记忆/注意力）
+
+v2.0 把 Agent 当作"人"设计——Persona 是身份，Memory 是记忆，ContextBuilder 是注意力。三者都通过 `agentcore.Options` 装配，**无需修改 agent-core 源码**即可让 Agent 拥有跨会话连续性（S11/P1）。
+
+- **Persona（身份，FR-010）**：`agentcontract.Persona{ID, Name, Role, SystemPrompt}`，跨会话持久存在的 Agent 身份。`Task.PersonaID` 把任务绑定到 Persona；记忆按 `PersonaID` 归档（不同 Persona 互不串扰）。
+- **Memory（五层记忆，FR-011）**：`MemoryLayer` 有 `working` / `shortterm` / `longterm` / `preference` / `skill` 五层。`MemoryStore` 接口（`Save`/`Query`/`Delete`）按 `PersonaID + Layer` 归档；runtime 提供默认 `VectorMemoryStore`（SQLite + sqlite-vec 余弦相似度 Top-K）。
+- **ContextBuilder（注意力，FR-012）**：在 Steering 之后、模型调用之前执行，基于 Persona + MemoryStore 检索相关记忆（默认 longterm/preference/skill 三层），按 token 预算裁剪后注入为一条 system 消息。注入触发 `memory.injected` 事件（S14/P3 可观测）。
+
+三示例（`tool_loop_agent` / `research_agent` / `workflow_agent`）共享这套抽象：tool_loop 注入 LongTerm 记忆；research 把 Evidence 写入 LongTerm 供下次 Run 检索；workflow 把 HITL 输入记录进 ShortTerm。详见 [agent-runtime 模块](/modules/agent-runtime) 与 [tools/cli/examples](/modules/tools-cli-examples)。集成验收测试（跨会话恢复 + 记忆注入可观测）在 `examples/integration/`，全离线确定性运行。

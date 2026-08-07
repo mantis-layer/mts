@@ -1,9 +1,17 @@
-// Command research_agent 是 Research Pattern 验证示例：用 agent-runtime 的
-// ResearchPattern（多轮研究 → 报告 Artifact + Evidence → Evaluator 验收）。
+// Command research_agent 是 Research Pattern 验证示例（v2.0 升级，Issue #46）：
+// 用 agent-runtime 的 ResearchPattern（多轮研究 → 报告 Artifact + Evidence →
+// Evaluator 验收），并加载 Persona + MemoryStore + ContextBuilder（A1/A2/S11/P1）。
+//
+// v2.0 新增：研究产出的 Evidence 摘要写入 LongTerm 记忆，下次 Run 可检索
+// （A3/S13/P2 跨会话恢复的写入端）。
 //
 // 运行（在 examples/research_agent 目录）：
 //
 //	go run . --task "读取 ../data.json，分析销售趋势并输出报告"
+//
+// 启用记忆持久化（下次运行会注入历史研究结论）：
+//
+//	go run . --persona-id researcher --memory ./mem.db --embed-dim 1536
 package main
 
 import (
@@ -17,7 +25,7 @@ import (
 	"time"
 
 	modelopenai "github.com/mantis-layer/mts/adapters/model-openai"
-	"github.com/mantis-layer/mts/agent-compose"
+	agentcontract "github.com/mantis-layer/mts/agent-contract"
 	agentcore "github.com/mantis-layer/mts/agent-core"
 	agentruntime "github.com/mantis-layer/mts/agent-runtime"
 	"github.com/mantis-layer/mts/tools"
@@ -30,6 +38,11 @@ func main() {
 	apiKey := flag.String("api-key", "", "API key")
 	model := flag.String("model", "", "模型名")
 	task := flag.String("task", "", "研究任务描述")
+	// v2.0 Persona + Memory 抽象（A1/A2/S11）。
+	personaID := flag.String("persona-id", "research-demo", "Persona ID（跨会话身份锚点）")
+	personaName := flag.String("persona-name", "研究员", "Persona 名称")
+	memoryPath := flag.String("memory", "", "记忆 SQLite 文件路径（空=不启用记忆注入与持久化）")
+	embedDim := flag.Int("embed-dim", 1536, "embedding 维度（需与所选 embedding 模型一致）")
 	flag.Parse()
 
 	bURL := firstNonEmpty(*baseURL, os.Getenv("MTS_BASEURL"))
@@ -44,16 +57,48 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化模型: %v", err)
 	}
-	agent, err := agentcompose.NewBuilder().
-		Name("research-demo").
-		Model(client).
-		Tools(tools.FileReader{}).
-		Build()
-	if err != nil {
-		log.Fatalf("组装 Agent: %v", err)
+
+	// 2. Persona + MemoryStore + ContextBuilder（v2.0 三件套，A1/A2/S11/P1）。
+	persona := &agentcontract.Persona{
+		ID:           *personaID,
+		Name:         *personaName,
+		Role:         "researcher",
+		SystemPrompt: "你是一名严谨的研究员，基于数据来源产出有据可查的研究报告。",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := persona.Validate(); err != nil {
+		log.Fatalf("Persona 校验: %v", err)
 	}
 
-	// 2. Runtime + Research Pattern + Evaluator
+	var memStore *agentruntime.VectorMemoryStore
+	var ctxBuilder agentcontract.ContextBuilder
+	if *memoryPath != "" {
+		memStore, err = agentruntime.NewVectorMemoryStore(*memoryPath, client, *embedDim)
+		if err != nil {
+			log.Fatalf("创建 MemoryStore: %v", err)
+		}
+		defer memStore.Close()
+		ctxBuilder = agentruntime.NewDefaultContextBuilder()
+	}
+
+	// 3. 组装 Agent（Options 装配三件套；MemoryStore 为 nil 时 agent-core 自动跳过）。
+	reg := agentcore.NewRegistry()
+	if err := reg.Register(tools.FileReader{}); err != nil {
+		log.Fatalf("注册工具: %v", err)
+	}
+	agent := agentcore.New(client, reg, agentcore.Options{
+		ContextBuilder: ctxBuilder,
+		Persona:        persona,
+		MemoryStore:    memStore,
+		OnEvent: func(ev agentcore.Event) {
+			if ev.Kind == agentcore.EventMemoryInjected && ev.Content != "" {
+				fmt.Printf("[记忆注入] 检索到历史研究结论\n")
+			}
+		},
+	})
+
+	// 4. Runtime + Research Pattern + Evaluator
 	rt, err := agentruntime.NewRuntime(
 		agentruntime.NewMemoryStorage(),
 		agentruntime.Budget{MaxIterations: 8, MaxToolCalls: 20},
@@ -69,21 +114,24 @@ func main() {
 		log.Fatalf("注册 Evaluator: %v", err)
 	}
 
-	// 3. 提交研究任务
+	// 5. 提交研究任务
 	input := *task
 	if input == "" {
 		input = "读取 ../data.json，分析销售数据趋势并输出中文研究报告"
 	}
 	run, err := rt.SubmitTask(context.Background(), &agentruntime.Task{
-		ID:   "research-demo-" + time.Now().Format("20060102150405"),
-		Name: "research-demo", Pattern: "research", Input: input,
+		ID:        "research-demo-" + time.Now().Format("20060102150405"),
+		Name:      "research-demo",
+		Pattern:   "research",
+		Input:     input,
+		PersonaID: persona.ID,
 	})
 	if err != nil {
 		log.Fatalf("提交任务: %v", err)
 	}
-	fmt.Printf("已提交任务: %s (run=%s)\n", run.TaskID, run.ID)
+	fmt.Printf("已提交任务: %s (run=%s, persona=%s)\n", run.TaskID, run.ID, persona.ID)
 
-	// 4. 执行并轮询（展示事件与证据）
+	// 6. 执行并轮询（展示事件与证据）
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	done := make(chan error, 1)
@@ -113,7 +161,7 @@ finish:
 		log.Fatalf("运行失败: %v", err)
 	}
 
-	// 5. 结果：报告 Artifact + Evaluator 验收（失败/取消时 Result 为空）
+	// 7. 结果：报告 Artifact + Evaluator 验收
 	final, err := rt.GetRun(context.Background(), run.ID)
 	if err != nil {
 		log.Fatalf("查询终态: %v", err)
@@ -134,8 +182,40 @@ finish:
 			fmt.Printf("Evaluator: %v\n", ev.Data)
 		}
 	}
+
+	// 8. v2.0：把研究结论写入 LongTerm 记忆（下次 Run 可检索，A3/S13/P2 写入端）。
+	if memStore != nil && final.Result != nil && len(final.Result.Artifacts) > 0 {
+		report := final.Result.Artifacts[0].Content
+		if err := saveEvidence(context.Background(), memStore, persona.ID, report); err != nil {
+			log.Printf("写入研究结论到记忆失败: %v", err)
+		} else {
+			fmt.Printf("[记忆] 已将本次研究结论写入 LongTerm（persona=%s），下次运行可注入\n", persona.ID)
+		}
+	}
+
 	fmt.Printf("=== 统计 ===\n工具调用: %d | 轮次: %d | tokens: %d\n",
 		final.ToolCalls, final.Iterations, final.Usage.TotalTokens)
+}
+
+// saveEvidence 把研究报告摘要作为 LongTerm 记忆持久化（跨会话可检索）。
+func saveEvidence(ctx context.Context, store *agentruntime.VectorMemoryStore, personaID, report string) error {
+	m := &agentcontract.Memory{
+		ID:        fmt.Sprintf("%s-research-%d", personaID, time.Now().UnixNano()),
+		PersonaID: personaID,
+		Layer:     agentcontract.MemoryLayerLongTerm,
+		Content:   clip(report, 800), // 摘要长度上限，避免记忆膨胀
+		Tags:      []string{"research", "evidence"},
+		CreatedAt: time.Now(),
+	}
+	return store.Save(ctx, m)
+}
+
+// clip 截断超长文本。
+func clip(s string, n int) string {
+	if len([]rune(s)) <= n {
+		return s
+	}
+	return strings.TrimSpace(string([]rune(s)[:n])) + "…"
 }
 
 // firstNonEmpty 返回首个非空值。
