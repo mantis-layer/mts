@@ -28,6 +28,9 @@ const (
 	EventAgentMessage EventKind = "agent.message"
 	// EventAgentError Agent 运行错误。
 	EventAgentError EventKind = "agent.error"
+	// EventMemoryInjected ContextBuilder 完成一次记忆注入（FR-012 / S14）。
+	// Content 携带注入的消息内容；Error 非 nil 表示检索失败已降级为不注入。
+	EventMemoryInjected EventKind = "memory.injected"
 	// EventRunEnd 一次 Run 结束。
 	EventRunEnd EventKind = "run.end"
 )

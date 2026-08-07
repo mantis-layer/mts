@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	agentcontract "github.com/mantis-layer/mts/agent-contract"
 	agentmodel "github.com/mantis-layer/mts/agent-model"
 )
 
@@ -21,7 +22,14 @@ type Options struct {
 	OnEvent func(Event)
 	// Steering 每次模型调用前调用，可修改消息列表或中止运行。
 	Steering func(ctx context.Context, msgs []agentmodel.Message) ([]agentmodel.Message, error)
-	// ContextHook 在 Steering 之后、模型调用之前变换输入消息（Context Transform Hook）。
+	// ContextBuilder 在 Steering 之后、ContextHook 之前注入相关记忆（FR-012）；
+	// 需同时配置 Persona 与 MemoryStore 才会被调用；为 nil 时跳过（与 v0.1 等价）。
+	ContextBuilder agentcontract.ContextBuilder
+	// Persona 是本次运行的 Agent 身份（FR-010）；为 nil 时跳过记忆注入。
+	Persona *agentcontract.Persona
+	// MemoryStore 是 Persona 的记忆存储（FR-011）；未配置时跳过记忆注入。
+	MemoryStore agentcontract.MemoryStore
+	// ContextHook 在 ContextBuilder 之后、模型调用之前变换输入消息（Context Transform Hook）。
 	ContextHook func(ctx context.Context, msgs []agentmodel.Message) []agentmodel.Message
 }
 
@@ -85,9 +93,9 @@ func (a *Agent) RunWithMessages(ctx context.Context, msgs []agentmodel.Message) 
 				return res, err
 			}
 		}
-		view := msgs
+		view := a.applyContextBuilder(ctx, msgs)
 		if a.opts.ContextHook != nil {
-			view = a.opts.ContextHook(ctx, msgs)
+			view = a.opts.ContextHook(ctx, view)
 		}
 
 		a.emit(Event{Kind: EventModelStart, Model: a.modelName()})
@@ -123,6 +131,29 @@ func (a *Agent) RunWithMessages(ctx context.Context, msgs []agentmodel.Message) 
 			msgs = append(msgs, resultMsg)
 		}
 	}
+}
+
+// applyContextBuilder 在 Steering 之后、ContextHook 之前执行记忆注入（FR-012）。
+// ContextBuilder/Persona/MemoryStore 任一未配置则跳过；
+// Build 失败（如检索超时）降级为不注入，不阻塞主循环（Run 不 fail）。
+func (a *Agent) applyContextBuilder(ctx context.Context, msgs []agentmodel.Message) []agentmodel.Message {
+	if a.opts.ContextBuilder == nil || a.opts.Persona == nil || a.opts.MemoryStore == nil {
+		return msgs
+	}
+	var current agentmodel.Message
+	if len(msgs) > 0 {
+		current = msgs[len(msgs)-1]
+	}
+	built, err := a.opts.ContextBuilder.Build(ctx, *a.opts.Persona, a.opts.MemoryStore, current)
+	if err != nil {
+		a.emit(Event{Kind: EventMemoryInjected, Error: err})
+		return msgs
+	}
+	if built.Content == "" {
+		return msgs
+	}
+	a.emit(Event{Kind: EventMemoryInjected, Content: built.Content})
+	return append([]agentmodel.Message{built}, msgs...)
 }
 
 // callModel 调用模型并组装 assistant 消息（含流式收集）。
