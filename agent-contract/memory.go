@@ -65,6 +65,10 @@ func (m Memory) Validate() error {
 type QueryOptions struct {
 	Limit int      // 返回条数上限；0 表示不限制
 	Tags  []string // 标签过滤
+	// QueryText 是向量检索的查询文本（FR-011，D5 回填）。
+	// 非 Working 层、且 store 配置了 EmbeddingProvider 时，Query 会对该文本
+	// 生成查询向量做余弦相似度 Top-K；为空时退化为 created_at 倒序。
+	QueryText string
 }
 
 // MemoryStore 是 Persona 记忆的存取接口（FR-011），可被插件替换实现。
