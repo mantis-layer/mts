@@ -117,9 +117,20 @@ func (rt *Runtime) SubmitTask(ctx context.Context, task *Task) (*TaskRun, error)
 	if _, ok := rt.getPattern(task.Pattern); !ok {
 		return nil, fmt.Errorf("agentruntime: Pattern %q 未注册", task.Pattern)
 	}
+	// FR-010：Task 绑定 Persona。PersonaID 为空 → 无 Persona（向后兼容 v0.1）；
+	// 非空 → 必须加载成功，ID 不存在返回 NotFoundError（不静默 nil）。
+	var persona *Persona
+	if task.PersonaID != "" {
+		p, err := rt.storage.GetPersona(ctx, task.PersonaID)
+		if err != nil {
+			return nil, err
+		}
+		persona = p
+	}
 	if task.CreatedAt.IsZero() {
 		task.CreatedAt = time.Now()
 	}
+	_ = persona // 绑定校验通过；当前 Run 不持久化 Persona 快照，下游通过 task.PersonaID 引用
 	run := &TaskRun{
 		ID:        newID("run"),
 		TaskID:    task.ID,

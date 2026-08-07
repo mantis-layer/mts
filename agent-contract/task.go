@@ -24,6 +24,7 @@ type Task struct {
 	Name      string
 	Pattern   string // 使用的 Pattern 名
 	Input     string // 用户任务输入
+	PersonaID string // 绑定的 Persona ID（FR-010）；空表示无 Persona，向后兼容 v0.1
 	CreatedAt time.Time
 }
 

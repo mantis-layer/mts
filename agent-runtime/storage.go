@@ -38,6 +38,14 @@ type Storage interface {
 	// 用于并发安全的状态迁移（外部 Cancel 与 Run 的状态机写不互相覆盖）。
 	CompareAndSetState(ctx context.Context, runID string, from, to RunState) (bool, error)
 
+	// SavePersona 写入或更新 Persona（FR-010）。
+	// 并发修改同一 Persona → last-write-wins（v2.0 简单方案）。
+	SavePersona(ctx context.Context, p *Persona) error
+	// GetPersona 按 ID 读取 Persona；不存在返回 NotFoundError。
+	GetPersona(ctx context.Context, id string) (*Persona, error)
+	// ListPersonas 列出全部 Persona，按 UpdatedAt 倒序（最近修改在前）。
+	ListPersonas(ctx context.Context) ([]Persona, error)
+
 	Close() error
 }
 
@@ -46,6 +54,7 @@ type MemoryStorage struct {
 	mu        sync.RWMutex
 	tasks     map[string]*Task
 	runs      map[string]*TaskRun
+	personae  map[string]*Persona
 	events    map[string][]RuntimeEvent
 	artifacts map[string][]Artifact
 	evidence  map[string][]Evidence
@@ -57,6 +66,7 @@ func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		tasks:     make(map[string]*Task),
 		runs:      make(map[string]*TaskRun),
+		personae:  make(map[string]*Persona),
 		events:    make(map[string][]RuntimeEvent),
 		artifacts: make(map[string][]Artifact),
 		evidence:  make(map[string][]Evidence),
@@ -193,6 +203,38 @@ func (s *MemoryStorage) CompareAndSetState(_ context.Context, runID string, from
 	r.State = to
 	r.UpdatedAt = time.Now()
 	return true, nil
+}
+
+func (s *MemoryStorage) SavePersona(_ context.Context, p *Persona) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// last-write-wins：直接覆盖（含 UpdatedAt）。
+	cp := *p
+	s.personae[p.ID] = &cp
+	return nil
+}
+
+func (s *MemoryStorage) GetPersona(_ context.Context, id string) (*Persona, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.personae[id]
+	if !ok {
+		return nil, &NotFoundError{Kind: "persona", ID: id}
+	}
+	cp := *p
+	return &cp, nil
+}
+
+func (s *MemoryStorage) ListPersonas(_ context.Context) ([]Persona, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Persona, 0, len(s.personae))
+	for _, p := range s.personae {
+		out = append(out, *p)
+	}
+	// 按 UpdatedAt 倒序（最近修改在前）。
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
 }
 func (s *MemoryStorage) Close() error { return nil }
 

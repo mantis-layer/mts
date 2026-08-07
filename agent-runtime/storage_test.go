@@ -88,6 +88,35 @@ func TestStorage_NotFound(t *testing.T) {
 	}
 }
 
+// TestStorage_Persona A4：Persona 存取契约（双实现对等）。
+// 覆盖 Save/Get/List/NotFoundError；跨会话恢复与排序细节见 persona_test.go。
+func TestStorage_Persona(t *testing.T) {
+	ctx := context.Background()
+	for _, s := range newTestStorage(t) {
+		now := time.Now().UTC().Truncate(time.Second)
+		if err := s.SavePersona(ctx, &Persona{
+			ID: "sp1", Name: "存储测试", Role: "r",
+			SystemPrompt: "prompt", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("SavePersona: %v", err)
+		}
+		got, err := s.GetPersona(ctx, "sp1")
+		if err != nil || got.Name != "存储测试" || got.SystemPrompt != "prompt" {
+			t.Fatalf("GetPersona = %+v, %v", got, err)
+		}
+		all, err := s.ListPersonas(ctx)
+		if err != nil || len(all) != 1 || all[0].ID != "sp1" {
+			t.Fatalf("ListPersonas = %+v, %v", all, err)
+		}
+		// NotFoundError 契约。
+		if _, err := s.GetPersona(ctx, "missing"); err == nil {
+			t.Fatal("GetPersona(不存在) 期望 NotFoundError")
+		} else if _, ok := err.(*NotFoundError); !ok {
+			t.Fatalf("期望 NotFoundError，得到 %T: %v", err, err)
+		}
+	}
+}
+
 // TestSQLite_MigrationOldSchema S1 回归：旧 schema 库（无 progress/task_input 列）
 // 打开后自动迁移 + 回填，GetRun 不因 NULL 崩溃。
 func TestSQLite_MigrationOldSchema(t *testing.T) {
@@ -119,5 +148,71 @@ func TestSQLite_MigrationOldSchema(t *testing.T) {
 	}
 	if r.Progress != "" || r.TaskInput != "" {
 		t.Fatalf("迁移后 Progress=%q TaskInput=%q，期望空串", r.Progress, r.TaskInput)
+	}
+}
+
+// TestStorage_TaskPersonaIDRoundTrip 验证 Task.PersonaID 在双实现（含 SQLite 落盘）往返不丢。
+// 回归保护：曾出现"加了字段但 tasks 表未持久化 persona_id"的缺口。
+func TestStorage_TaskPersonaIDRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	for _, s := range newTestStorage(t) {
+		task := &Task{ID: "t-pid", Name: "persona task", Pattern: "tool_loop",
+			Input: "hi", PersonaID: "persona-7", CreatedAt: time.Now()}
+		if err := s.SaveTask(ctx, task); err != nil {
+			t.Fatalf("SaveTask: %v", err)
+		}
+		got, err := s.GetTask(ctx, "t-pid")
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if got.PersonaID != "persona-7" {
+			t.Fatalf("PersonaID 往返丢失: got %q, want persona-7", got.PersonaID)
+		}
+
+		// 空 PersonaID（向后兼容 v0.1 无 Persona 的 Task）也必须往返一致。
+		task2 := &Task{ID: "t-nopid", Name: "legacy", Pattern: "tool_loop",
+			Input: "hi", CreatedAt: time.Now()}
+		if err := s.SaveTask(ctx, task2); err != nil {
+			t.Fatalf("SaveTask(空 PersonaID): %v", err)
+		}
+		got2, err := s.GetTask(ctx, "t-nopid")
+		if err != nil {
+			t.Fatalf("GetTask(空): %v", err)
+		}
+		if got2.PersonaID != "" {
+			t.Fatalf("空 PersonaID 往返不一致: got %q, want empty", got2.PersonaID)
+		}
+	}
+}
+
+// TestSQLite_TaskPersonaIDMigration 旧 tasks 表（无 persona_id 列）打开后自动迁移 + 回填，
+// SaveTask/GetTask 不因 NULL 崩溃。
+func TestSQLite_TaskPersonaIDMigration(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "old-tasks.db")
+	raw, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY, name TEXT, pattern TEXT, input TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO tasks (id, name, pattern, input, created_at)
+		VALUES ('t_old', 'n', 'tool_loop', 'x', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	s, err := NewSQLiteStorage(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStorage(旧 tasks 库): %v", err)
+	}
+	defer s.Close()
+	got, err := s.GetTask(context.Background(), "t_old")
+	if err != nil {
+		t.Fatalf("GetTask(旧行迁移后): %v", err)
+	}
+	if got.PersonaID != "" {
+		t.Fatalf("旧行迁移后 PersonaID=%q，期望空串回填", got.PersonaID)
 	}
 }
