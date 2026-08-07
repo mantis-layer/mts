@@ -60,7 +60,7 @@ func dir(path string) string {
 func (s *SQLiteStorage) initSchema() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS tasks (
-			id TEXT PRIMARY KEY, name TEXT, pattern TEXT, input TEXT, created_at TEXT)`,
+			id TEXT PRIMARY KEY, name TEXT, pattern TEXT, input TEXT, created_at TEXT, persona_id TEXT)`,
 		`CREATE TABLE IF NOT EXISTS runs (
 			id TEXT PRIMARY KEY, task_id TEXT, pattern TEXT, state TEXT, iterations INTEGER,
 			tool_calls INTEGER, usage_json TEXT, summary TEXT, progress TEXT, task_input TEXT, input TEXT, result_json TEXT,
@@ -71,13 +71,21 @@ func (s *SQLiteStorage) initSchema() error {
 			id TEXT PRIMARY KEY, run_id TEXT, name TEXT, type TEXT, content TEXT, created_at TEXT)`,
 		`CREATE TABLE IF NOT EXISTS evidence (
 			artifact_id TEXT, source TEXT, quote TEXT)`,
+		`CREATE TABLE IF NOT EXISTS personae (
+			id TEXT PRIMARY KEY, name TEXT, role TEXT, system_prompt TEXT,
+			created_at TEXT, updated_at TEXT)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_personae_updated ON personae(updated_at)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
 			return fmt.Errorf("agentruntime: sqlite schema: %w", err)
 		}
+	}
+	// 旧库迁移：tasks 表新增 persona_id 列（幂等；仅忽略 duplicate column）。
+	if _, err := s.db.Exec(`ALTER TABLE tasks ADD COLUMN persona_id TEXT`); err != nil && !isDuplicateColumn(err) {
+		return fmt.Errorf("agentruntime: migrate tasks.persona_id: %w", err)
 	}
 	// 旧库迁移：runs 表新增 progress/task_input 列（幂等；仅忽略 duplicate column）。
 	if _, err := s.db.Exec(`ALTER TABLE runs ADD COLUMN progress TEXT`); err != nil && !isDuplicateColumn(err) {
@@ -93,6 +101,10 @@ func (s *SQLiteStorage) initSchema() error {
 	if _, err := s.db.Exec(`UPDATE runs SET task_input = '' WHERE task_input IS NULL`); err != nil {
 		return fmt.Errorf("agentruntime: backfill task_input: %w", err)
 	}
+	// 回填 NULL（旧行 tasks.persona_id 为 NULL，GetTask 裸 string 扫描会报错）
+	if _, err := s.db.Exec(`UPDATE tasks SET persona_id = '' WHERE persona_id IS NULL`); err != nil {
+		return fmt.Errorf("agentruntime: backfill tasks.persona_id: %w", err)
+	}
 	return nil
 }
 
@@ -103,8 +115,8 @@ func isDuplicateColumn(err error) bool {
 
 func (s *SQLiteStorage) SaveTask(ctx context.Context, task *Task) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO tasks (id, name, pattern, input, created_at) VALUES (?,?,?,?,?)`,
-		task.ID, task.Name, task.Pattern, task.Input, task.CreatedAt.Format(time.RFC3339Nano))
+		`INSERT OR REPLACE INTO tasks (id, name, pattern, input, created_at, persona_id) VALUES (?,?,?,?,?,?)`,
+		task.ID, task.Name, task.Pattern, task.Input, task.CreatedAt.Format(time.RFC3339Nano), task.PersonaID)
 	if err != nil {
 		return fmt.Errorf("agentruntime: save task: %w", err)
 	}
@@ -113,10 +125,10 @@ func (s *SQLiteStorage) SaveTask(ctx context.Context, task *Task) error {
 
 func (s *SQLiteStorage) GetTask(ctx context.Context, id string) (*Task, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, pattern, input, created_at FROM tasks WHERE id = ?`, id)
+		`SELECT id, name, pattern, input, created_at, persona_id FROM tasks WHERE id = ?`, id)
 	var t Task
 	var createdAt string
-	if err := row.Scan(&t.ID, &t.Name, &t.Pattern, &t.Input, &createdAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.Pattern, &t.Input, &createdAt, &t.PersonaID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &NotFoundError{Kind: "task", ID: id}
 		}
@@ -400,6 +412,53 @@ func (s *SQLiteStorage) CompareAndSetState(ctx context.Context, runID string, fr
 		return false, err
 	}
 	return n == 1, nil
+}
+
+func (s *SQLiteStorage) SavePersona(ctx context.Context, p *Persona) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO personae (id, name, role, system_prompt, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
+		p.ID, p.Name, p.Role, p.SystemPrompt, p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("agentruntime: save persona: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStorage) GetPersona(ctx context.Context, id string) (*Persona, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, role, system_prompt, created_at, updated_at FROM personae WHERE id = ?`, id)
+	var p Persona
+	var createdAt, updatedAt string
+	if err := row.Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &createdAt, &updatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, &NotFoundError{Kind: "persona", ID: id}
+		}
+		return nil, fmt.Errorf("agentruntime: get persona: %w", err)
+	}
+	p.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	p.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return &p, nil
+}
+
+func (s *SQLiteStorage) ListPersonas(ctx context.Context) ([]Persona, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, role, system_prompt, created_at, updated_at FROM personae ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("agentruntime: query personae: %w", err)
+	}
+	defer rows.Close()
+	var out []Persona
+	for rows.Next() {
+		var p Persona
+		var createdAt, updatedAt string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("agentruntime: scan persona: %w", err)
+		}
+		p.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		p.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLiteStorage) Close() error { return s.db.Close() }

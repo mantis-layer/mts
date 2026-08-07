@@ -6,13 +6,14 @@ import (
 	contract "github.com/mantis-layer/mts/agent-contract"
 )
 
-// RunState / Task / TaskRun / TaskResult 上移至 agent-contract；
+// RunState / Task / TaskRun / TaskResult / Persona 上移至 agent-contract；
 // runtime 通过 type alias 保持 API 兼容。
 type (
 	RunState   = contract.RunState
 	Task       = contract.Task
 	TaskRun    = contract.TaskRun
 	TaskResult = contract.TaskResult
+	Persona    = contract.Persona
 )
 
 // Re-export constants。
